@@ -6,7 +6,10 @@ import androidx.compose.runtime.remember
 
 import androidx.compose.runtime.mutableStateOf
 
-import androidx.compose.foundation.layout.scale
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.scale
 
 import androidx.compose.animation.core.spring
 
