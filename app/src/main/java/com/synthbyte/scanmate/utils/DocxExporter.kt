@@ -377,6 +377,6 @@ object DocxExporter {
         .replace("&", "&amp;")
         .replace("<", "&lt;")
         .replace(">", "&gt;")
-        .replace(""", "&quot;")
+        .replace("\"", "&quot;")
         .replace("'", "&apos;")
 }
