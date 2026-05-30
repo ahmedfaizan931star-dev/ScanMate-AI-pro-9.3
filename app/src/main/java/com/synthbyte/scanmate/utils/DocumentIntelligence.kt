@@ -61,9 +61,9 @@ object DocumentIntelligence {
 
     fun extractBusinessCard(ocrText: String): BusinessCardResult {
         val lines = ocrText.lines().map { it.trim() }.filter { it.isNotBlank() }
-        val emailR = Regex("[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}")
-        val phoneR = Regex("(\+?[0-9][\s\-.]?){7,15}")
-        val urlR = Regex("(https?://|www\.)[^\s]+")
+val emailR = Regex("""[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}""")
+val phoneR = Regex("""(\+?[0-9][\s\-.]?){7,15}""")
+val urlR = Regex("""(https?://|www\.)[^\s]+""")
         val email = lines.firstNotNullOfOrNull { emailR.find(it)?.value }
         val phone = lines.firstNotNullOfOrNull { phoneR.find(it)?.value }
         val url = lines.firstNotNullOfOrNull { urlR.find(it)?.value }
@@ -86,7 +86,7 @@ object DocumentIntelligence {
             tips.add("Try High Contrast filter")
             score -= 15
         }
-        val words = ocrText.split(Regex("\s+")).count { it.length > 1 }
+        val words = ocrText.split(Regex("""\s+""")).count { it.length > 1 }
         if (words < 10 && ocrText.isNotBlank()) {
             issues.add("Very little text detected")
             tips.add("Check alignment")
