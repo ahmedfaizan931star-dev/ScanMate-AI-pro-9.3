@@ -53,6 +53,7 @@ android {
             versionNameSuffix = "-debug"
             isDebuggable = true
         }
+
         release {
             isDebuggable = false
             isMinifyEnabled = true
@@ -77,7 +78,9 @@ android {
         jvmTarget = "17"
         freeCompilerArgs += listOf(
             "-Xjvm-default=all",
-            "-opt-in=androidx.compose.material3.ExperimentalMaterial3Api"
+            "-opt-in=androidx.compose.material3.ExperimentalMaterial3Api",
+            "-opt-in=kotlinx.coroutines.FlowPreview",
+            "-opt-in=kotlinx.coroutines.ExperimentalCoroutinesApi"
         )
     }
 
@@ -102,7 +105,6 @@ android {
         }
     }
 }
-
 
 dependencies {
     implementation(platform(libs.androidx.compose.bom))
@@ -131,18 +133,17 @@ dependencies {
     implementation(libs.converter.moshi)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.coroutines.core)
-    debugImplementation(libs.logging.interceptor)
     implementation(libs.moshi.kotlin)
     implementation(libs.okhttp)
     implementation(libs.retrofit)
     implementation(libs.zxing.core)
     implementation(libs.hilt.android)
     implementation(libs.androidx.biometric)
+
     implementation("com.itextpdf:itextg:5.5.10")
     implementation("com.madgag.spongycastle:core:1.58.0.0")
-implementation("com.madgag.spongycastle:prov:1.58.0.0")
-implementation("com.madgag.spongycastle:core:1.58.0.0")
-implementation("com.madgag.spongycastle:prov:1.58.0.0")
+    implementation("com.madgag.spongycastle:prov:1.58.0.0")
+    implementation("com.madgag.spongycastle:bcpkix-jdk15on:1.58.0.0")
 
     implementation("com.google.android.gms:play-services-mlkit-text-recognition:19.0.0")
     implementation("com.google.android.gms:play-services-mlkit-barcode-scanning:18.3.0")
@@ -163,6 +164,7 @@ implementation("com.madgag.spongycastle:prov:1.58.0.0")
     androidTestImplementation(libs.hilt.android.testing)
     androidTestImplementation(libs.kotlinx.coroutines.test)
 
+    debugImplementation(libs.logging.interceptor)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
 
