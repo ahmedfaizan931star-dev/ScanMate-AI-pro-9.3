@@ -143,7 +143,7 @@ dependencies {
 implementation("com.madgag.spongycastle:prov:1.58.0.0")
 implementation("com.madgag.spongycastle:core:1.58.0.0")
 implementation("com.madgag.spongycastle:prov:1.58.0.0")
-implementation("com.madgag.spongycastle:pkix-jdk15on:1.58.0.0")
+
     implementation("com.google.android.gms:play-services-mlkit-text-recognition:19.0.0")
     implementation("com.google.android.gms:play-services-mlkit-barcode-scanning:18.3.0")
 
