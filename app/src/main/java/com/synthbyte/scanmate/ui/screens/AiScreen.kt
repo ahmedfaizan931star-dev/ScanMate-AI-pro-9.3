@@ -67,6 +67,9 @@ import com.synthbyte.scanmate.utils.NetworkUtils
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.synthbyte.scanmate.ui.viewmodels.DocumentViewModel
 import kotlinx.coroutines.launch
+import com.synthbyte.scanmate.utils.FileCore
+
+private const val BUSINESS_CARD = "BUSINESS_CARD"
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -85,10 +88,28 @@ fun AiScreen(onNavigateBack: () -> Unit, settingsRepository: SettingsRepository)
     var responseIsError by remember { mutableStateOf(false) }
     var isOfflineFallback by remember { mutableStateOf(false) }
     var isLoading by remember { mutableStateOf(false) }
+    var selectedWorkflow by remember { mutableStateOf<AiWorkflow?>(null) }
+    var selectedWorkflowId by remember { mutableStateOf<String?>(null) }
     val coroutineScope = rememberCoroutineScope()
     val documentViewModel: DocumentViewModel = hiltViewModel()
     val recentDocuments by documentViewModel.allDocuments.collectAsState(initial = emptyList())
     val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    val cardResult = remember(prompt, selectedWorkflowId) {
+        if (selectedWorkflowId == BUSINESS_CARD && prompt.isNotBlank()) DocumentIntelligence.extractBusinessCard(prompt) else null
+    }
+
+    fun buildVCard(card: DocumentIntelligence.BusinessCardResult): String = buildString {
+        appendLine("BEGIN:VCARD")
+        appendLine("VERSION:3.0")
+        card.name?.takeIf { it.isNotBlank() }?.let { name ->
+            appendLine("FN:$name")
+            appendLine("N:$name;;;;")
+        }
+        card.email?.takeIf { it.isNotBlank() }?.let { appendLine("EMAIL:$it") }
+        card.phone?.takeIf { it.isNotBlank() }?.let { appendLine("TEL:$it") }
+        card.website?.takeIf { it.isNotBlank() }?.let { appendLine("URL:$it") }
+        appendLine("END:VCARD")
+    }
 
     fun showLocalError(message: String) {
         responseTitle = "Needs attention"
@@ -105,6 +126,8 @@ fun AiScreen(onNavigateBack: () -> Unit, settingsRepository: SettingsRepository)
     }
 
     fun runSmartWorkflow(workflow: AiWorkflow, sourceText: String) {
+        selectedWorkflow = workflow
+        selectedWorkflowId = workflow.name
         val finalText = sourceText.trim()
         if (finalText.isBlank()) {
             showLocalError("Paste OCR text or type a prompt first.")
@@ -171,14 +194,22 @@ fun AiScreen(onNavigateBack: () -> Unit, settingsRepository: SettingsRepository)
 
             item(key = "ai_workflow_grid") {
                 WorkflowChipGrid(
-                    selectedWorkflow = null,
+                    selectedWorkflow = selectedWorkflow,
+                    selectedBusinessCard = selectedWorkflowId == BUSINESS_CARD,
                     enabled = !isLoading,
                     onWorkflowSelected = { workflow ->
                         if (prompt.isBlank()) {
+                            selectedWorkflow = workflow
+                            selectedWorkflowId = workflow.name
                             prompt = workflow.promptPrefix
                         } else {
                             runSmartWorkflow(workflow, prompt)
                         }
+                    },
+                    onBusinessCardSelected = {
+                        selectedWorkflow = null
+                        selectedWorkflowId = BUSINESS_CARD
+                        if (prompt.isBlank()) showLocalError("Paste business card OCR text first.")
                     }
                 )
             }
@@ -225,10 +256,9 @@ fun AiScreen(onNavigateBack: () -> Unit, settingsRepository: SettingsRepository)
                     onValueChange = { prompt = it },
                     label = { Text("Paste OCR text, receipt, invoice, homework question, or document notes") },
                     supportingText = {
-                        Text(
-                            if (canUseOnlineAi) "Online AI uses ${selectedModel.displayName}. Offline fallback still protects the workflow."
-                            else "Offline intelligence is active. Add a Gemini key in Settings for deeper online AI."
-                        )
+                        if (canUseOnlineAi) {
+                            Text("Online AI uses ${selectedModel.displayName}. Offline fallback still protects the workflow.")
+                        }
                     },
                     modifier = Modifier.fillMaxWidth().height(190.dp),
                     maxLines = 8,
@@ -255,6 +285,24 @@ fun AiScreen(onNavigateBack: () -> Unit, settingsRepository: SettingsRepository)
                 item(key = "ai_progress") { LinearProgressIndicator(modifier = Modifier.fillMaxWidth()) }
             }
 
+            cardResult?.let { card ->
+                item(key = "ai_business_card_result") {
+                    BusinessCardResultCard(
+                        card = card,
+                        onCopy = { label, value ->
+                            clipboardManager.setPrimaryClip(ClipData.newPlainText(label, value))
+                            Toast.makeText(context, "$label copied", Toast.LENGTH_SHORT).show()
+                        },
+                        onSaveVCard = {
+                            coroutineScope.launch {
+                                val file = FileCore.saveTextFile(context, buildVCard(card), "contact_${System.currentTimeMillis()}.vcf")
+                                Toast.makeText(context, if (file != null) "vCard saved" else "vCard save failed", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    )
+                }
+            }
+
             item(key = "ai_response") {
                 AnimatedVisibility(response.isNotBlank()) {
                     ResponseCard(
@@ -278,8 +326,10 @@ fun AiScreen(onNavigateBack: () -> Unit, settingsRepository: SettingsRepository)
 @Composable
 private fun WorkflowChipGrid(
     selectedWorkflow: AiWorkflow?,
+    selectedBusinessCard: Boolean,
     enabled: Boolean,
-    onWorkflowSelected: (AiWorkflow) -> Unit
+    onWorkflowSelected: (AiWorkflow) -> Unit,
+    onBusinessCardSelected: () -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Smart Workflows", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -296,6 +346,12 @@ private fun WorkflowChipGrid(
                     label = { Text(workflow.label) }
                 )
             }
+            FilterChip(
+                selected = selectedBusinessCard,
+                onClick = onBusinessCardSelected,
+                enabled = enabled,
+                label = { Text("Business Card") }
+            )
         }
     }
 }
@@ -339,6 +395,50 @@ private fun AiHeroCard(canUseOnlineAi: Boolean, isOnline: Boolean, selectedModel
                     style = MaterialTheme.typography.bodyMedium
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun BusinessCardResultCard(
+    card: DocumentIntelligence.BusinessCardResult,
+    onCopy: (String, String) -> Unit,
+    onSaveVCard: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.16f))
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Business Card", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            BusinessCardRow("Name", card.name, onCopy)
+            BusinessCardRow("Email", card.email, onCopy)
+            BusinessCardRow("Phone", card.phone, onCopy)
+            BusinessCardRow("Website", card.website, onCopy)
+            TextButton(onClick = onSaveVCard) { Text("Save as vCard") }
+        }
+    }
+}
+
+@Composable
+private fun BusinessCardRow(label: String, value: String?, onCopy: (String, String) -> Unit) {
+    val safeValue = value?.takeIf { it.isNotBlank() } ?: "—"
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(safeValue, style = MaterialTheme.typography.bodyMedium)
+        }
+        IconButton(
+            enabled = value?.isNotBlank() == true,
+            onClick = { onCopy(label, safeValue) }
+        ) {
+            Icon(Icons.Default.ContentCopy, null)
         }
     }
 }

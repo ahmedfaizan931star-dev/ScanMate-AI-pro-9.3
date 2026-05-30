@@ -5,11 +5,16 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
@@ -17,10 +22,13 @@ import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -30,11 +38,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.synthbyte.scanmate.data.SettingsRepository
 import com.synthbyte.scanmate.ui.screens.home.HomeBottomNavigation
 import com.synthbyte.scanmate.ui.screens.home.DocumentRow
-import com.synthbyte.scanmate.ui.screens.home.HomeDocumentFilterRow
 import com.synthbyte.scanmate.ui.screens.home.HomeDocumentEmptyState
 import com.synthbyte.scanmate.ui.screens.home.HomeDocumentSectionHeader
 import com.synthbyte.scanmate.ui.screens.home.HomeHeaderZone
@@ -44,7 +53,14 @@ import com.synthbyte.scanmate.ui.screens.home.HomeToolChipRow
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.synthbyte.scanmate.ui.viewmodels.DocumentViewModel
 import com.synthbyte.scanmate.widgets.WidgetStateStore
-import java.util.Locale
+import androidx.compose.foundation.clickable
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.SearchBar
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 
 private enum class DocumentFilterMode(val label: String, val sectionTitle: String) {
     ALL("All", "Recent files"),
@@ -169,12 +185,87 @@ fun HomeScreen(
                     }
                 )
             }
+            item(key = "home_search") {
+                val searchQuery by viewModel.searchQuery.collectAsState()
+                val results by viewModel.searchResults.collectAsState()
+                SearchBar(
+                    query = searchQuery,
+                    onQueryChange = viewModel::setSearchQuery,
+                    onSearch = {},
+                    active = searchQuery.isNotBlank(),
+                    onActiveChange = { if (!it) viewModel.setSearchQuery("") },
+                    placeholder = { Text("Search documents and text…") },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+                ) {
+                    LazyColumn {
+                        items(results, key = { it.id }) { doc ->
+                            val sourceText = doc.ocrText.orEmpty()
+                            val snippet = sourceText.let { t ->
+                                val idx = t.indexOf(searchQuery, ignoreCase = true).takeIf { it >= 0 } ?: 0
+                                t.substring(idx.coerceAtLeast(0), (idx + 80).coerceAtMost(t.length))
+                            }
+                            ListItem(
+                                headlineContent = { Text(doc.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                supportingContent = {
+                                    val annotated = buildAnnotatedString {
+                                        val lower = snippet.lowercase()
+                                        val qLower = searchQuery.lowercase()
+                                        var i = 0
+                                        while (i < snippet.length) {
+                                            val hit = if (qLower.isBlank()) -1 else lower.indexOf(qLower, i)
+                                            if (hit < 0) {
+                                                append(snippet.substring(i))
+                                                break
+                                            }
+                                            append(snippet.substring(i, hit))
+                                            withStyle(SpanStyle(background = MaterialTheme.colorScheme.primaryContainer)) {
+                                                append(snippet.substring(hit, hit + searchQuery.length))
+                                            }
+                                            i = hit + searchQuery.length
+                                        }
+                                    }
+                                    Text(annotated, maxLines = 2)
+                                },
+                                modifier = Modifier.clickable { onNavigateToDoc(doc.id) }
+                            )
+                            HorizontalDivider()
+                        }
+                    }
+                }
+            }
             item(key = "home_document_filters") {
-                HomeDocumentFilterRow(
-                    selectedFilter = filterMode.label,
-                    filters = DocumentFilterMode.entries.map { it.label },
-                    onFilterSelected = { label -> filterMode = DocumentFilterMode.entries.first { it.label == label } }
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    DocumentFilterMode.entries.forEach { mode ->
+                        FilterChip(
+                            selected = (filterMode == mode),
+                            onClick = { filterMode = mode },
+                            label = {
+                                Text(
+                                    text = mode.label,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp
+                                )
+                            },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+                                containerColor = MaterialTheme.colorScheme.surface,
+                                labelColor = MaterialTheme.colorScheme.onSurfaceVariant
+                            ),
+                            border = if (filterMode == mode) null else
+                                FilterChipDefaults.filterChipBorder(
+                                    enabled = true,
+                                    selected = false,
+                                    borderColor = MaterialTheme.colorScheme.outline,
+                                    borderWidth = 1.dp
+                                ),
+                            shape = RoundedCornerShape(20.dp)
+                        )
+                    }
+                }
             }
             item(key = "home_documents_header") {
                 HomeDocumentSectionHeader(

@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -101,6 +102,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import kotlin.math.roundToInt
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.material.icons.filled.Analytics
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Switch
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -125,6 +131,8 @@ fun DocumentDetailScreen(
     var exportName by remember { mutableStateOf("") }
     var exportProgress by remember { mutableStateOf<String?>(null) }
     var selectedPageSize by remember { mutableStateOf(PdfPageSize.A4) }
+    var passwordProtect by remember { mutableStateOf(false) }
+    var pdfPassword by remember { mutableStateOf("") }
     var topBarMenuExpanded by remember { mutableStateOf(false) }
     var category by remember { mutableStateOf("General") }
     var tags by remember { mutableStateOf("") }
@@ -172,6 +180,10 @@ fun DocumentDetailScreen(
                 Toast.makeText(context, "OCR completed · ${state.qualityLabel}", Toast.LENGTH_SHORT).show()
                 viewModel.clearExportState()
             }
+            is ExportState.QualitySuccess -> {
+                isProcessing = false
+                exportProgress = null
+            }
             is ExportState.Error -> {
                 isProcessing = false
                 exportProgress = null
@@ -214,6 +226,14 @@ fun DocumentDetailScreen(
                             onClick = {
                                 topBarMenuExpanded = false
                                 viewModel.extractOcr(documentWithPages)
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Document Quality") },
+                            leadingIcon = { Icon(Icons.Default.Analytics, null) },
+                            onClick = {
+                                viewModel.scoreQuality(documentWithPages)
+                                topBarMenuExpanded = false
                             }
                         )
                         documentWithPages?.let { dwp ->
@@ -380,11 +400,29 @@ fun DocumentDetailScreen(
                             FilterChip(selected = selectedPageSize == size, onClick = { selectedPageSize = size }, label = { Text(size.label) })
                         }
                     }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Switch(checked = passwordProtect, onCheckedChange = { passwordProtect = it })
+                        Spacer(Modifier.width(8.dp))
+                        Text("Password protect PDF", style = MaterialTheme.typography.bodyMedium)
+                    }
+                    AnimatedVisibility(visible = passwordProtect) {
+                        OutlinedTextField(
+                            value = pdfPassword,
+                            onValueChange = { pdfPassword = it },
+                            label = { Text("PDF Password") },
+                            visualTransformation = PasswordVisualTransformation(),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
                     Text("Choose quality", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     PdfExportQuality.entries.forEach { quality ->
                         OutlinedButton(onClick = {
                             showExportDialog = false
-                            viewModel.exportPdf(documentWithPages, quality, exportName, selectedPageSize)
+                            if (passwordProtect && pdfPassword.isNotBlank()) {
+                                viewModel.exportProtectedPdf(documentWithPages, pdfPassword, exportName)
+                            } else {
+                                viewModel.exportPdf(documentWithPages, quality, exportName, selectedPageSize)
+                            }
                         }, modifier = Modifier.fillMaxWidth()) {
                             Column(horizontalAlignment = Alignment.Start, modifier = Modifier.fillMaxWidth()) {
                                 Text(quality.label, fontWeight = FontWeight.Bold)
@@ -397,6 +435,38 @@ fun DocumentDetailScreen(
             confirmButton = {},
             dismissButton = { TextButton(onClick = { showExportDialog = false }) { Text("Cancel") } }
         )
+    }
+
+
+    if (exportState is ExportState.QualitySuccess) {
+        val report = (exportState as ExportState.QualitySuccess).report
+        ModalBottomSheet(onDismissRequest = { viewModel.clearExportState() }) {
+            Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Document Quality", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(
+                        progress = { report.score / 100f },
+                        modifier = Modifier.size(80.dp),
+                        strokeWidth = 8.dp,
+                        color = when {
+                            report.score >= 85 -> MaterialTheme.colorScheme.primary
+                            report.score >= 65 -> MaterialTheme.colorScheme.tertiary
+                            else -> MaterialTheme.colorScheme.error
+                        }
+                    )
+                    Text("${report.score}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold)
+                }
+                Text(report.label, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+                if (report.issues.isNotEmpty()) {
+                    Text("Issues", fontWeight = FontWeight.Bold)
+                    report.issues.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
+                }
+                if (report.tips.isNotEmpty()) {
+                    Text("Tips", fontWeight = FontWeight.Bold)
+                    report.tips.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
+                }
+            }
+        }
     }
 
     exportedPdf?.let { pdfFile ->

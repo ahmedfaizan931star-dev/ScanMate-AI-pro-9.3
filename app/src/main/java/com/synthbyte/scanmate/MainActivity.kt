@@ -4,7 +4,7 @@ import android.content.Intent
 import android.os.Bundle
 import android.os.Process
 import android.util.Log
-import androidx.activity.ComponentActivity
+import androidx.fragment.app.FragmentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Box
@@ -56,7 +56,7 @@ import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
 
 @AndroidEntryPoint
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
     private var shortcutRouteState: MutableState<String>? = null
     private lateinit var settingsRepository: SettingsRepository
 

@@ -137,6 +137,8 @@ dependencies {
     implementation(libs.retrofit)
     implementation(libs.zxing.core)
     implementation(libs.hilt.android)
+    implementation(libs.androidx.biometric)
+    implementation("com.itextpdf:itextg:5.5.10")
     implementation("com.google.android.gms:play-services-mlkit-text-recognition:19.0.0")
     implementation("com.google.android.gms:play-services-mlkit-barcode-scanning:18.3.0")
 
@@ -153,6 +155,8 @@ dependencies {
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.runner)
+    androidTestImplementation(libs.hilt.android.testing)
+    androidTestImplementation(libs.kotlinx.coroutines.test)
 
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
@@ -161,4 +165,5 @@ dependencies {
     ksp(libs.moshi.kotlin.codegen)
     kapt(libs.hilt.compiler)
     kaptTest(libs.hilt.compiler)
+    kaptAndroidTest(libs.hilt.compiler)
 }

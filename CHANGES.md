@@ -1,53 +1,58 @@
-# CHANGES — Principal Repair v2
+# ScanMate AI Pro — Final 3-Fix Pass
 
-## FIX 1 — PageEditorScreen.kt + PageEditorViewModelProvider.kt + PageEditorViewModel.kt
-- Confirmed `PageEditorScreen.kt` has zero `AppDatabase` hits.
-- Moved `rememberPageEditorViewModel(docId, pageId)` into dedicated `PageEditorViewModelProvider.kt` following the provider pattern.
-- Removed the PageEditor provider helper from `DocumentViewModelProvider.kt`.
-- Kept PageEditor composable mutations routed through `PageEditorViewModel` methods: `saveEditedPage`, `replacePageImage`, `deleteCurrentPage`, `duplicatePage`, `movePage`, `savePageOcr`.
-- Added PageEditor async error state so ViewModel launch failures are surfaced to UI.
+## Scope control
+- Source files inspected for this pass: 171 files.
+- Source files modified: 2 Kotlin files.
+- Allowed target files checked:
+  1. `app/src/main/java/com/synthbyte/scanmate/ui/screens/home/HomeDocumentList.kt`
+  2. `app/src/main/java/com/synthbyte/scanmate/ui/screens/AiScreen.kt`
+  3. `app/src/main/java/com/synthbyte/scanmate/ui/screens/HomeScreen.kt`
+- No Gradle, Room schema, navigation route, backend, auth, Firebase, cloud, or subscription files were modified.
 
-## FIX 2 — DocumentDetailScreen.kt + DocumentDetailViewModel.kt
-- Added `reorderPage(pageId, newOrder)` to `DocumentDetailViewModel` with `viewModelScope.launch(Dispatchers.IO)` and page renumbering.
-- Replaced data-mutation `coroutineScope.launch` blocks in `DocumentDetailScreen.kt` page management with ViewModel launch methods and completion callbacks.
-- Remaining `coroutineScope.launch` hits are file/OCR UI export actions inside `OcrCard`.
+## Fix 1 — HomeDocumentList.kt
+**File:** `app/src/main/java/com/synthbyte/scanmate/ui/screens/home/HomeDocumentList.kt`
 
-## FIX 3 — AppViewModel.kt + GlobalErrorBoundary.kt + MainActivity.kt + ViewModels
-- Added `AppViewModel` with `globalError: StateFlow<String?>`, `reportError`, and `clearError`.
-- Updated `GlobalErrorBoundary` to render either synchronous composition exceptions or async app errors.
-- Provided `AppViewModel` at the top of `MainActivity.setContent` and passed it into `GlobalErrorBoundary`.
-- Wrapped `DocumentDetailViewModel` `viewModelScope.launch` bodies in `runCatching` and publish errors through `ExportState.Error`.
-- Wrapped `PageEditorViewModel.deleteCurrentPage` launch body in `runCatching` and exposed a UI-visible error state.
+**Verification:** line 1–178 inspected. This file contains no `LazyColumn` `items()` calls, so there was no `items(documents) { ... }` call to patch in this attached ZIP.
 
-## FIX 4 — CameraScreen.kt
-- Replaced CapturedThumbnailStrip Coil model path usage with `ImageRequest.Builder(ctx).data(file).diskCacheKey(...).memoryCacheKey(...).crossfade(true).build()`.
+**Result:** `grep -n "items(" HomeDocumentList.kt` returns zero hits.
 
-## FIX 5 — DocumentDetailScreen.kt
-- Ensured the MoreVert overflow `IconButton` and its `DropdownMenu` are anchored together inside a `Box`.
-- Updated icon content description to `More options`.
+## Fix 2 — AiScreen.kt
+**File:** `app/src/main/java/com/synthbyte/scanmate/ui/screens/AiScreen.kt`
 
-## FIX 6 — FileManagerScreen.kt
-- Added `FileThumb(file, modifier)` that renders image previews, a PDF badge, or a fallback file icon by extension.
-- Replaced generic thumbnails in both list row and grid cell with `FileThumb(file, Modifier.size(48.dp, 60.dp))`.
+**Changed lines:** 227–231
 
-## FIX 7 — HomeDocumentList.kt + HomeScreen.kt
-- Added standalone `HomeDocumentEmptyState(onScanClick)` composable.
-- Home empty list now calls `item(key = "home_empty") { HomeDocumentEmptyState(onScanClick = onNavigateToCamera) }`.
-- Confirmed zero `@Suppress("UNUSED_PARAMETER")` annotations in `HomeDocumentList.kt`.
+**Change:** Removed the duplicate grey offline status message from the `OutlinedTextField` supporting text below the input field. The retained offline notice is the inline banner above the input box.
 
-## FIX 8 — HomeHeroCard.kt
-- Removed HeroStat boxes and replaced them with a context-aware greeting and pinned count text only when pinned documents exist.
+**Result:** `grep -n "Offline intelligence is active" AiScreen.kt` returns zero hits.
 
-## FIX 9 — app/build.gradle.kts + GeminiApiService.kt + proguard-rules.pro
-- Confirmed logging interceptor dependency is `debugImplementation(libs.logging.interceptor)`.
-- Kept Gemini OkHttp logging behind `BuildConfig.DEBUG` using reflection so release source compilation does not require the debug-only logging artifact.
-- Added/normalized R8 no-side-effects rule for `HttpLoggingInterceptor.log(String)`.
+## Fix 3 — HomeScreen.kt
+**File:** `app/src/main/java/com/synthbyte/scanmate/ui/screens/HomeScreen.kt`
 
-## FIX 10 — DocDao.kt + DocumentViewModel.kt + QrScreen.kt
-- Added fixed Room query `getQrHistory(): Flow<List<QrHistory>>` with `LIMIT 50`.
-- Confirmed `DocumentViewModel.qrHistory` exposes DAO QR history.
-- Added QR history `Recent` section to `QrScreen` with a copy `IconButton` per entry.
+**Changed lines:** 8–35, 177–214
 
-## Verification
-- See `VERIFY_REPORT.md`.
-- Full exact unified diff is in `PRINCIPAL_REPAIR_DIFF.patch`.
+**Change:** Replaced the filter-row call with the requested `FilterChip` implementation:
+- Selected chip uses `primary` / `onPrimary`.
+- Unselected chip uses `surface` plus a 1.dp `outline` border.
+- All chips use `RoundedCornerShape(20.dp)`, bold label text, and `12.sp`.
+
+**Result:** `grep -n "selectedContainerColor = MaterialTheme.colorScheme.primary" HomeScreen.kt` confirms selected styling, and `grep -n "borderColor = MaterialTheme.colorScheme.outline" HomeScreen.kt` confirms unselected border styling.
+
+## Final confirmation
+- [x] HomeDocumentList.kt checked for every `items()` call; there are zero `items()` calls in this ZIP.
+- [x] AiScreen.kt duplicate grey offline message removed.
+- [x] HomeScreen.kt filter chips are visually distinct: selected primary, unselected bordered surface.
+- [x] No schema or navigation routes changed.
+- [x] No cloud, login, backend, Firebase, auth, or subscription added.
+- [x] No hardcoded `Color(0x...)` added to modified UI files.
+
+
+## Build attempt
+Command run from project root:
+
+```bash
+bash ./gradlew assembleRelease --warning-mode all
+```
+
+Result: Gradle wrapper could not download Gradle 8.9 in this sandbox because DNS/network access to `services.gradle.org` is blocked. Compilation did not start here.
+
+Exit code: `1`

@@ -107,6 +107,8 @@ import java.io.File
 import java.util.concurrent.Executors
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+import android.graphics.Bitmap
+import com.synthbyte.scanmate.utils.FilterType
 
 private enum class ScanQuality(val label: String, val jpegQuality: Int, val captureMode: Int) {
     STANDARD("Standard", 84, ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY),
@@ -162,6 +164,8 @@ fun CameraScreen(
     var autoDetectEnabled by remember { mutableStateOf(true) }
     var stableFrameCount by remember { mutableIntStateOf(0) }
     var detectedCorners by remember { mutableStateOf<List<Offset>?>(null) }
+    var currentConfidence by remember { mutableStateOf(0f) }
+    var selectedFilter by remember { mutableStateOf(FilterType.ORIGINAL) }
 
     fun finishDocument() {
         if (capturedImages.isEmpty()) {
@@ -194,10 +198,30 @@ fun CameraScreen(
             object : ImageCapture.OnImageSavedCallback {
                 override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
                     coroutineScope.launch {
-                        val finalFile = if (quality == ScanQuality.MAX) {
+                        val qualityFile = if (quality == ScanQuality.MAX) {
                             viewModel.sharpenCapturedImageFile(photoFile)
                         } else {
                             photoFile
+                        }
+                        val finalFile = if (selectedFilter != FilterType.ORIGINAL) {
+                            withContext(Dispatchers.IO) {
+                                val bitmap = FileUtils.decodeSampledBitmap(qualityFile.absolutePath, 2600, 2600)
+                                if (bitmap == null) {
+                                    qualityFile
+                                } else {
+                                    val filtered = FileUtils.applyFilter(bitmap, selectedFilter)
+                                    FileUtils.saveBitmapToFolder(
+                                        context = context,
+                                        bitmap = filtered,
+                                        folderName = "Scans",
+                                        filename = "FILTERED_${qualityFile.nameWithoutExtension}",
+                                        format = Bitmap.CompressFormat.JPEG,
+                                        quality = quality.jpegQuality
+                                    ) ?: qualityFile
+                                }
+                            }
+                        } else {
+                            qualityFile
                         }
                         capturedImages.add(finalFile)
                         val corners = detectedCorners
@@ -295,6 +319,7 @@ fun CameraScreen(
                                 if (!autoDetectEnabled) {
                                     mainHandler.post {
                                         detectedCorners = null
+                                        currentConfidence = 0f
                                         stableFrameCount = 0
                                     }
                                     return@setAnalyzer
@@ -306,9 +331,11 @@ fun CameraScreen(
                                 mainHandler.post {
                                     if (result == null) {
                                         detectedCorners = null
+                                        currentConfidence = 0f
                                         stableFrameCount = 0
                                     } else {
                                         detectedCorners = result.corners
+                                        currentConfidence = result.confidence
                                         if (result.confidence > 0.62f && autoDetectEnabled && !isSaving && !isFinishing) {
                                             stableFrameCount += 1
                                             if (stableFrameCount >= 10) {
@@ -345,7 +372,7 @@ fun CameraScreen(
             modifier = Modifier.fillMaxSize()
         )
 
-        DocumentOverlay(corners = detectedCorners)
+        DocumentOverlay(corners = detectedCorners, confidence = currentConfidence)
 
         Column(
             modifier = Modifier
@@ -396,6 +423,19 @@ fun CameraScreen(
                         )
                     }
                     Text("Current quality: ${quality.label}", style = MaterialTheme.typography.bodyMedium)
+                    Text("Capture filter", style = MaterialTheme.typography.titleMedium)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = selectedFilter == FilterType.ORIGINAL,
+                            onClick = { selectedFilter = FilterType.ORIGINAL },
+                            label = { Text("Original") }
+                        )
+                        FilterChip(
+                            selected = selectedFilter == FilterType.WHITEBOARD,
+                            onClick = { selectedFilter = FilterType.WHITEBOARD },
+                            label = { Text("Whiteboard") }
+                        )
+                    }
                 }
             }
         }

@@ -32,10 +32,14 @@ object FileUtils {
     fun drawNoteStampOnBitmap(source: Bitmap, text: String): Bitmap = ImageProcessor.drawNoteStampOnBitmap(source, text)
     fun compressBitmap(source: Bitmap, quality: Int = 90, format: Bitmap.CompressFormat = Bitmap.CompressFormat.JPEG): ByteArray = ImageProcessor.compressBitmap(source, quality, format)
     fun applyWatermark(source: Bitmap, text: String = "ScanMate AI Pro"): Bitmap = ImageProcessor.applyWatermark(source, text)
+    fun removeMarksFromBitmap(source: Bitmap, sensitivity: Float = 0.18f): Bitmap = ImageProcessor.removeMarksFromBitmap(source, sensitivity)
+    fun removeShadowFromBitmap(source: Bitmap): Bitmap = ImageProcessor.removeShadowFromBitmap(source)
+    fun deskewBitmap(source: Bitmap): Bitmap = ImageProcessor.deskewBitmap(source)
 
     suspend fun generatePdf(context: Context, images: List<Bitmap>, filename: String): File? = PdfExporter.generatePdf(context, images, filename)
     suspend fun generatePdfFromBitmaps(context: Context, bitmaps: List<Bitmap>, filename: String, quality: PdfExportQuality = PdfExportQuality.BALANCED, pageSize: PdfPageSize = PdfPageSize.AUTO, onProgress: ((String) -> Unit)? = null): File? = PdfExporter.generatePdfFromBitmaps(context, bitmaps, filename, quality, pageSize, onProgress)
     suspend fun generatePdfFromPaths(context: Context, imagePaths: List<String>, filename: String, quality: PdfExportQuality = PdfExportQuality.BALANCED, pageSize: PdfPageSize = PdfPageSize.AUTO, onProgress: ((String) -> Unit)? = null, ocrRectsByPath: Map<String, List<Pair<android.graphics.Rect, String>>> = emptyMap()): File? = PdfExporter.generatePdfFromPaths(context, imagePaths, filename, quality, pageSize, onProgress, ocrRectsByPath)
+    suspend fun generatePasswordProtectedPdf(context: Context, imagePaths: List<String>, filename: String, userPassword: String): File? = PdfExporter.generatePasswordProtectedPdf(context, imagePaths, filename, userPassword)
     fun renderPdfUriToBitmaps(context: Context, uri: Uri, maxWidth: Int = 1800, pageRange: IntRange? = null): List<Bitmap> = PdfExporter.renderPdfUriToBitmaps(context, uri, maxWidth, pageRange)
     suspend fun generatePdfFromText(context: Context, text: String, filename: String, pageSize: PdfPageSize = PdfPageSize.A4): File? = PdfExporter.generatePdfFromText(context, text, filename, pageSize)
     suspend fun saveRenderedPdfPagesAsImages(context: Context, pages: List<Bitmap>, filename: String): List<File> = PdfExporter.saveRenderedPdfPagesAsImages(context, pages, filename)
@@ -65,7 +69,8 @@ enum class FilterType(val label: String) {
     BOOK_PAGE("Book Page"),
     LOW_LIGHT_CLEANUP("Low Light"),
     SHADOW_REDUCTION("Shadow Fix"),
-    SHARP_SCAN("Sharp Scan")
+    SHARP_SCAN("Sharp Scan"),
+    WHITEBOARD("Whiteboard")
 }
 
 enum class PdfPageSize(val label: String, val widthPt: Int, val heightPt: Int) {

@@ -69,20 +69,22 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
-import com.synthbyte.scanmate.data.AppDatabase
 import com.synthbyte.scanmate.data.Page
 import com.synthbyte.scanmate.utils.FileUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.synthbyte.scanmate.ui.viewmodels.DocumentDetailViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SignatureScreen(docId: Long, onNavigateBack: () -> Unit) {
     val context = LocalContext.current
-    val dao = remember { AppDatabase.getDatabase(context).docDao() }
-    val pages by remember(docId) { dao.getPagesForDocument(docId) }.collectAsState(initial = emptyList())
-    val orderedPages = remember(pages) { pages.sortedBy { it.pageOrder } }
+    val viewModel: DocumentDetailViewModel = hiltViewModel()
+    val documentWithPages by viewModel.documentWithPages.collectAsState(initial = null)
+    val pages = documentWithPages?.pages.orEmpty()
+    val orderedPages = remember(docId, pages) { pages.sortedBy { it.pageOrder } }
     val scope = rememberCoroutineScope()
 
     val strokes = remember { mutableStateListOf<List<Offset>>() }
@@ -240,7 +242,7 @@ fun SignatureScreen(docId: Long, onNavigateBack: () -> Unit) {
                                 FileUtils.saveEditedBitmap(context, stamped, "SIGNED_PAGE_${targetPage.id}")
                             }
                             if (saved != null) {
-                                withContext(Dispatchers.IO) { dao.updatePageImage(targetPage.id, saved.absolutePath) }
+                                viewModel.updatePageImage(targetPage.id, saved.absolutePath)
                                 Toast.makeText(context, "Signature applied to page", Toast.LENGTH_SHORT).show()
                                 version++
                             } else {

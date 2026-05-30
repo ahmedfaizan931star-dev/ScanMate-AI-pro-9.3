@@ -30,6 +30,7 @@ sealed interface ExportState {
     data class PdfSuccess(val file: File) : ExportState
     data class DocxSuccess(val file: File) : ExportState
     data class OcrSuccess(val text: String, val qualityLabel: String) : ExportState
+    data class QualitySuccess(val report: DocumentIntelligence.QualityReport) : ExportState
     data class Error(val message: String) : ExportState
 }
 
@@ -131,6 +132,27 @@ class DocumentDetailViewModel @Inject constructor(
                 publishErrorMessage("PDF export failed. Check that pages are valid images.")
             }
         }.onFailure { throwable -> publishError(throwable) }
+    }
+
+
+    fun exportProtectedPdf(dwp: DocumentWithPages?, password: String, filename: String) = viewModelScope.launch {
+        if (dwp == null || dwp.pages.isEmpty()) {
+            publishErrorMessage("No pages to export")
+            return@launch
+        }
+        _exportState.value = ExportState.Loading("Encrypting PDF…")
+        runCatching {
+            val paths = dwp.pages.sortedBy { it.pageOrder }.map { it.imagePath }
+            val file = FileUtils.generatePasswordProtectedPdf(context, paths, filename, password)
+            _exportState.value = if (file != null) ExportState.PdfSuccess(file) else ExportState.Error("PDF encryption failed")
+        }.onFailure { throwable -> publishError(throwable) }
+    }
+
+    fun scoreQuality(dwp: DocumentWithPages?) = viewModelScope.launch {
+        if (dwp == null) return@launch
+        val text = dwp.document.ocrText.orEmpty()
+        val confidence = OcrHelper.buildStats(text).confidencePercent / 100f
+        _exportState.value = ExportState.QualitySuccess(DocumentIntelligence.scoreDocumentQuality(text, confidence, dwp.pages.size))
     }
 
     fun extractOcr(dwp: DocumentWithPages?) = viewModelScope.launch {

@@ -68,7 +68,7 @@ import com.synthbyte.scanmate.domain.GeminiModels
 import com.synthbyte.scanmate.utils.NetworkUtils
 import kotlinx.coroutines.launch
 
-private const val PRIVACY_URL = "https://ahmedfaizan931star-dev.github.io/scanmate-privacy"
+private const val PRIVACY_URL = "https://synthbyte.github.io/scanmate-privacy"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

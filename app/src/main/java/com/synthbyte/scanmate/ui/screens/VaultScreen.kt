@@ -55,11 +55,52 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import androidx.biometric.BiometricManager
+import androidx.biometric.BiometricPrompt
+import androidx.core.content.ContextCompat
+import androidx.fragment.app.FragmentActivity
+import androidx.compose.material.icons.filled.Fingerprint
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.text.style.TextAlign
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun VaultScreen(onNavigateBack: () -> Unit) {
     val context = LocalContext.current
+    var vaultUnlocked by remember { mutableStateOf(false) }
+    val biometricManager = BiometricManager.from(context)
+    val canAuth = biometricManager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL)
+    if (!vaultUnlocked) {
+        LaunchedEffect(Unit) {
+            if (canAuth == BiometricManager.BIOMETRIC_SUCCESS) {
+                val prompt = BiometricPrompt(
+                    context as FragmentActivity,
+                    ContextCompat.getMainExecutor(context),
+                    object : BiometricPrompt.AuthenticationCallback() {
+                        override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) { vaultUnlocked = true }
+                        override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {}
+                    }
+                )
+                prompt.authenticate(
+                    BiometricPrompt.PromptInfo.Builder()
+                        .setTitle("Unlock Vault")
+                        .setSubtitle("Authenticate to access encrypted documents")
+                        .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL)
+                        .build()
+                )
+            } else {
+                vaultUnlocked = true
+            }
+        }
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(32.dp)) {
+                Icon(Icons.Default.Fingerprint, null, Modifier.size(64.dp), tint = MaterialTheme.colorScheme.primary)
+                Text("Vault Locked", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold)
+                Text("Authenticate to access your encrypted documents.", style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+            }
+        }
+        return
+    }
     val scope = rememberCoroutineScope()
     var vaultItems by remember { mutableStateOf<List<File>>(emptyList()) }
     var previewName by remember { mutableStateOf<String?>(null) }

@@ -78,8 +78,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import com.synthbyte.scanmate.data.AppDatabase
-import com.synthbyte.scanmate.data.QrHistory
 import com.synthbyte.scanmate.utils.FileUtils
 import com.synthbyte.scanmate.utils.QrPayloadParser
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
@@ -98,6 +96,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.synthbyte.scanmate.ui.viewmodels.DocumentViewModel
 
 @OptIn(ExperimentalPermissionsApi::class, ExperimentalMaterial3Api::class, ExperimentalGetImage::class)
 @Composable
@@ -113,7 +113,7 @@ fun QrScannerScreen(onNavigateBack: () -> Unit) {
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val dao = remember { AppDatabase.getDatabase(context).docDao() }
+    val documentViewModel: DocumentViewModel = hiltViewModel()
     val coroutineScope = rememberCoroutineScope()
     val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     val previewView = remember {
@@ -212,7 +212,7 @@ fun QrScannerScreen(onNavigateBack: () -> Unit) {
                                         scanResult = value
                                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                         coroutineScope.launch(Dispatchers.IO) {
-                                            dao.insertQrHistory(QrHistory(value = value, type = "SCANNED"))
+                                            documentViewModel.insertQrHistory(value, "SCANNED")
                                         }
                                     }
                                 }

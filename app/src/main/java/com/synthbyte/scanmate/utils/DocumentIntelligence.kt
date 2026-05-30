@@ -50,6 +50,67 @@ enum class AiWorkflow(val label: String, val description: String, val promptPref
 }
 
 object DocumentIntelligence {
+
+    data class BusinessCardResult(
+        val name: String?,
+        val email: String?,
+        val phone: String?,
+        val website: String?,
+        val rawLines: List<String>
+    )
+
+    fun extractBusinessCard(ocrText: String): BusinessCardResult {
+        val lines = ocrText.lines().map { it.trim() }.filter { it.isNotBlank() }
+        val emailR = Regex("[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}")
+        val phoneR = Regex("(\+?[0-9][\s\-.]?){7,15}")
+        val urlR = Regex("(https?://|www\.)[^\s]+")
+        val email = lines.firstNotNullOfOrNull { emailR.find(it)?.value }
+        val phone = lines.firstNotNullOfOrNull { phoneR.find(it)?.value }
+        val url = lines.firstNotNullOfOrNull { urlR.find(it)?.value }
+        val name = lines.firstOrNull { !it.contains("@") && !phoneR.containsMatchIn(it) && it.length in 3..40 }
+        return BusinessCardResult(name, email, phone, url, lines)
+    }
+
+    data class QualityReport(val score: Int, val label: String, val issues: List<String>, val tips: List<String>)
+
+    fun scoreDocumentQuality(ocrText: String, avgConfidence: Float, pageCount: Int): QualityReport {
+        val issues = mutableListOf<String>()
+        val tips = mutableListOf<String>()
+        var score = 100
+        if (avgConfidence < 0.5f) {
+            issues.add("Low OCR confidence")
+            tips.add("Rescan in better lighting")
+            score -= 30
+        } else if (avgConfidence < 0.75f) {
+            issues.add("Moderate OCR confidence")
+            tips.add("Try High Contrast filter")
+            score -= 15
+        }
+        val words = ocrText.split(Regex("\s+")).count { it.length > 1 }
+        if (words < 10 && ocrText.isNotBlank()) {
+            issues.add("Very little text detected")
+            tips.add("Check alignment")
+            score -= 20
+        }
+        val noise = ocrText.count { !it.isLetterOrDigit() && !it.isWhitespace() }.toFloat() / ocrText.length.coerceAtLeast(1)
+        if (noise > 0.3f) {
+            issues.add("High noise ratio")
+            tips.add("Apply B&W filter")
+            score -= 15
+        }
+        if (pageCount == 0) {
+            issues.add("No pages")
+            score = 0
+        }
+        score = score.coerceIn(0, 100)
+        val label = when {
+            score >= 85 -> "Excellent"
+            score >= 65 -> "Good"
+            score >= 40 -> "Fair"
+            else -> "Poor"
+        }
+        return QualityReport(score, label, issues, tips)
+    }
     val workflows: List<AiWorkflow> = AiWorkflow.entries
 
     fun buildPrompt(workflow: AiWorkflow, sourceText: String): String = "${workflow.promptPrefix}\n\n${sourceText.trim()}"

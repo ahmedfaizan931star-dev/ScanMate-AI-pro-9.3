@@ -19,6 +19,34 @@ import kotlin.math.max
 import kotlin.math.roundToInt
 
 object PdfExporter {
+
+    suspend fun generatePasswordProtectedPdf(
+        context: Context,
+        imagePaths: List<String>,
+        filename: String,
+        userPassword: String
+    ): File? = withContext(Dispatchers.IO) {
+        runCatching {
+            val safeBaseName = FileUtils.sanitizeFileBaseName(filename.ifBlank { "ScanMate_${System.currentTimeMillis()}" })
+                .removeSuffix(".pdf")
+                .removeSuffix(".PDF")
+            val base = generatePdfFromPaths(context, imagePaths, safeBaseName, PdfExportQuality.BALANCED, PdfPageSize.A4)
+                ?: return@runCatching null
+            val out = File(base.parent ?: return@runCatching null, "protected_${safeBaseName}.pdf")
+            val reader = com.itextpdf.text.pdf.PdfReader(base.absolutePath)
+            val stamper = com.itextpdf.text.pdf.PdfStamper(reader, out.outputStream())
+            stamper.setEncryption(
+                userPassword.toByteArray(),
+                "${userPassword}_owner".toByteArray(),
+                com.itextpdf.text.pdf.PdfWriter.ALLOW_PRINTING or com.itextpdf.text.pdf.PdfWriter.ALLOW_COPY,
+                com.itextpdf.text.pdf.PdfWriter.ENCRYPTION_AES_128
+            )
+            stamper.close()
+            reader.close()
+            base.delete()
+            out.takeIf { it.exists() && it.length() > 0L }
+        }.getOrNull()
+    }
     suspend fun generatePdf(context: Context, images: List<Bitmap>, filename: String): File? = withContext(Dispatchers.IO) {
         generatePdfInternal(context, images, filename, PdfPageSize.A4, null)
     }

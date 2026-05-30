@@ -17,6 +17,13 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.stateIn
 
 @HiltViewModel
 class DocumentViewModel @Inject constructor(
@@ -31,6 +38,17 @@ class DocumentViewModel @Inject constructor(
     val pageCount: Flow<Int> = dao.getPageCountFlow()
     val pdfCount: Flow<Int> = dao.getPdfCountFlow()
     val qrHistory: Flow<List<QrHistory>> = dao.getQrHistory()
+
+    val searchQuery = MutableStateFlow("")
+    val searchResults: StateFlow<List<Document>> = searchQuery
+        .debounce(300L)
+        .flatMapLatest { q -> if (q.isBlank()) flowOf(emptyList()) else dao.searchDocuments(q) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun setSearchQuery(q: String) {
+        searchQuery.value = q
+    }
+
 
     fun createDocumentFromUris(
         uris: List<Uri>,

@@ -205,10 +205,107 @@ object ImageProcessor {
         return result
     }
 
+
+    fun removeMarksFromBitmap(source: Bitmap, sensitivity: Float = 0.18f): Bitmap {
+        val w = source.width
+        val h = source.height
+        val pixels = IntArray(w * h).also { source.getPixels(it, 0, w, 0, 0, w, h) }
+        val output = pixels.copyOf()
+        val threshold = (255 * (1f - sensitivity)).toInt().coerceIn(160, 245)
+        for (y in 1 until h - 1) {
+            for (x in 1 until w - 1) {
+                val idx = y * w + x
+                val lum = (Color.red(pixels[idx]) * 0.299f + Color.green(pixels[idx]) * 0.587f + Color.blue(pixels[idx]) * 0.114f).toInt()
+                if (lum < threshold) {
+                    val ns = listOf(
+                        pixels[(y - 1) * w + x],
+                        pixels[(y + 1) * w + x],
+                        pixels[y * w + x - 1],
+                        pixels[y * w + x + 1],
+                        pixels[(y - 1) * w + x - 1],
+                        pixels[(y - 1) * w + x + 1],
+                        pixels[(y + 1) * w + x - 1],
+                        pixels[(y + 1) * w + x + 1]
+                    )
+                    val al = ns.map { Color.red(it) * 0.299f + Color.green(it) * 0.587f + Color.blue(it) * 0.114f }.average()
+                    if (al > threshold + 30) {
+                        output[idx] = Color.rgb(
+                            ns.map { Color.red(it) }.average().toInt(),
+                            ns.map { Color.green(it) }.average().toInt(),
+                            ns.map { Color.blue(it) }.average().toInt()
+                        )
+                    }
+                }
+            }
+        }
+        return Bitmap.createBitmap(w, h, source.config ?: Bitmap.Config.ARGB_8888).also { it.setPixels(output, 0, w, 0, 0, w, h) }
+    }
+
+    fun removeShadowFromBitmap(source: Bitmap): Bitmap {
+        val w = source.width
+        val h = source.height
+        val pixels = IntArray(w * h).also { source.getPixels(it, 0, w, 0, 0, w, h) }
+        val lums = pixels.map { Color.red(it) * 0.299f + Color.green(it) * 0.587f + Color.blue(it) * 0.114f }
+        val p95 = lums.sorted().let { it[(it.size * 0.95f).toInt().coerceAtMost(it.lastIndex)] }
+        val scale = if (p95 > 0f) 255f / p95 else 1f
+        val output = pixels.map {
+            Color.rgb(
+                (Color.red(it) * scale).toInt().coerceIn(0, 255),
+                (Color.green(it) * scale).toInt().coerceIn(0, 255),
+                (Color.blue(it) * scale).toInt().coerceIn(0, 255)
+            )
+        }.toIntArray()
+        return Bitmap.createBitmap(w, h, source.config ?: Bitmap.Config.ARGB_8888).also { it.setPixels(output, 0, w, 0, 0, w, h) }
+    }
+
+    fun deskewBitmap(source: Bitmap): Bitmap {
+        val maxSide = 1200
+        val sc = maxSide.toFloat() / maxOf(source.width, source.height).coerceAtLeast(1)
+        val work = if (sc < 1f) Bitmap.createScaledBitmap(source, (source.width * sc).toInt().coerceAtLeast(1), (source.height * sc).toInt().coerceAtLeast(1), true) else source
+        val pixels = IntArray(work.width * work.height).also { work.getPixels(it, 0, work.width, 0, 0, work.width, work.height) }
+        val binary = BooleanArray(pixels.size) { i -> Color.red(pixels[i]) < 128 }
+        var bestAngle = 0f
+        var bestScore = Double.NEGATIVE_INFINITY
+        generateSequence(-10f) { if (it + 0.5f <= 10f) it + 0.5f else null }.forEach { angle ->
+            val rad = Math.toRadians(angle.toDouble())
+            val rowSums = IntArray(work.height)
+            for (y in 0 until work.height) {
+                for (x in 0 until work.width) {
+                    val rx = (x * kotlin.math.cos(rad) - y * kotlin.math.sin(rad)).toInt()
+                    val ry = (x * kotlin.math.sin(rad) + y * kotlin.math.cos(rad)).toInt()
+                    if (rx in 0 until work.width && ry in 0 until work.height && binary[ry * work.width + rx]) rowSums[y]++
+                }
+            }
+            val mean = rowSums.average()
+            val v = rowSums.sumOf { value -> (value - mean) * (value - mean) } / work.height
+            if (v > bestScore) {
+                bestScore = v
+                bestAngle = angle
+            }
+        }
+        if (work !== source) runCatching { work.recycle() }
+        if (kotlin.math.abs(bestAngle) < 0.4f) return source
+        return Bitmap.createBitmap(source, 0, 0, source.width, source.height, Matrix().apply { postRotate(-bestAngle) }, true)
+    }
+
     fun applyFilter(original: Bitmap, type: FilterType): Bitmap {
         val safe = original.copy(Bitmap.Config.ARGB_8888, false)
         if (type == FilterType.ORIGINAL) return safe
         if (type == FilterType.SHARPEN || type == FilterType.SHARP_SCAN) return sharpenBitmap(safe)
+        if (type == FilterType.WHITEBOARD) {
+            val w = safe.width
+            val h = safe.height
+            val pixels = IntArray(w * h).also { safe.getPixels(it, 0, w, 0, 0, w, h) }
+            val output = pixels.map { px ->
+                val lum = Color.red(px) * 0.299f + Color.green(px) * 0.587f + Color.blue(px) * 0.114f
+                val boosted = ((lum - 180f) * 4f).coerceIn(0f, 255f).toInt()
+                Color.rgb(255 - boosted, 255 - boosted, 255 - boosted)
+            }.toIntArray()
+            return Bitmap.createBitmap(w, h, safe.config ?: Bitmap.Config.ARGB_8888).also {
+                it.setPixels(output, 0, w, 0, 0, w, h)
+                if (!safe.isRecycled) runCatching { safe.recycle() }
+            }
+        }
 
         val result = Bitmap.createBitmap(safe.width, safe.height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(result)
@@ -249,6 +346,7 @@ object ImageProcessor {
                 colorMatrix.setSaturation(0.92f)
                 colorMatrix.postConcat(contrastMatrix(1.1f, 42f))
             }
+            FilterType.WHITEBOARD -> Unit
         }
 
         paint.colorFilter = ColorMatrixColorFilter(colorMatrix)

@@ -76,6 +76,25 @@ class PageEditorViewModel @Inject constructor(
 
     fun applyFilter(filter: FilterType) = applyFilter(filter.name)
 
+
+    fun removeMarks(sensitivity: Float = 0.18f) = viewModelScope.launch(Dispatchers.IO) {
+        val bmp = _workingBitmap.value ?: return@launch
+        runCatching { _workingBitmap.value = ImageProcessor.removeMarksFromBitmap(bmp, sensitivity) }
+            .onFailure { throwable -> publishError(throwable, "Mark removal failed") }
+    }
+
+    fun removeShadow() = viewModelScope.launch(Dispatchers.IO) {
+        val bmp = _workingBitmap.value ?: return@launch
+        runCatching { _workingBitmap.value = ImageProcessor.removeShadowFromBitmap(bmp) }
+            .onFailure { throwable -> publishError(throwable, "Shadow removal failed") }
+    }
+
+    fun deskew() = viewModelScope.launch(Dispatchers.IO) {
+        val bmp = _workingBitmap.value ?: return@launch
+        runCatching { _workingBitmap.value = ImageProcessor.deskewBitmap(bmp) }
+            .onFailure { throwable -> publishError(throwable, "Deskew failed") }
+    }
+
     suspend fun saveEditedPage(pageId: Long, bitmap: Bitmap): java.io.File? = withContext(Dispatchers.IO) {
         runCatching {
             val file = FileUtils.saveEditedBitmap(context, bitmap, "PAGE_${pageId}")

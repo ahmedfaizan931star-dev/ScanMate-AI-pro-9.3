@@ -140,7 +140,7 @@ object OcrHelper {
                 activeRecognizer.process(InputImage.fromBitmap(bitmap, rotationDegrees))
                     .addOnSuccessListener { result ->
                         if (continuation.isActive) {
-                            continuation.resume(buildStats(result.toSortedText(), result.symbolConfidencePercent()))
+                            continuation.resume(buildStats(reconstructParagraphs(result.textBlocks), result.symbolConfidencePercent()))
                         }
                     }
                     .addOnFailureListener { e ->
@@ -150,6 +150,38 @@ object OcrHelper {
                 if (continuation.isActive) continuation.resume(buildStats("OCR failed: ${e.localizedMessage ?: "Unknown error"}", 0))
             }
         }
+
+
+    private fun reconstructParagraphs(blocks: List<com.google.mlkit.vision.text.Text.TextBlock>): String {
+        if (blocks.isEmpty()) return ""
+        val sorted = blocks.sortedWith(compareBy({ it.boundingBox?.top ?: 0 }, { it.boundingBox?.left ?: 0 }))
+        val paras = mutableListOf<StringBuilder>()
+        var cur = StringBuilder()
+        var lastBottom = sorted.first().boundingBox?.bottom ?: 0
+        sorted.forEach { block ->
+            val top = block.boundingBox?.top ?: 0
+            val gap = top - lastBottom
+            val h = ((block.boundingBox?.bottom ?: 0) - top).coerceAtLeast(1)
+            if (gap > h * 1.4f && cur.isNotBlank()) {
+                paras.add(cur)
+                cur = StringBuilder()
+            }
+            block.lines.forEach { line ->
+                val t = line.text.trim()
+                if (t.isNotBlank()) {
+                    if (cur.isNotBlank()) cur.append(" ")
+                    cur.append(t)
+                }
+            }
+            lastBottom = block.boundingBox?.bottom ?: lastBottom
+        }
+        if (cur.isNotBlank()) paras.add(cur)
+        return paras.joinToString("\n\n") { paragraph ->
+            var t = paragraph.toString().trim()
+            if (t.isNotEmpty() && t.last().isLetter()) t += "."
+            t.replace(Regex(" {2,}"), " ").replace(Regex("([a-z])([A-Z])"), "$1 $2")
+        }
+    }
 
     private fun Text.toSortedText(): String {
         return textBlocks
