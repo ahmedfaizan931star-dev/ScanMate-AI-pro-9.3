@@ -38,12 +38,8 @@ fun GlobalErrorBoundary(
     val activeError = error?.localizedMessage ?: asyncError
 
     if (activeError == null) {
-        try {
-            androidx.compose.runtime.key(retryKey) { content() }
-        } catch (throwable: Throwable) {
-            error = throwable
-        }
-    } else {
+    androidx.compose.runtime.key(retryKey) { content() }
+} else {
         Column(
             modifier = Modifier.fillMaxSize().padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
