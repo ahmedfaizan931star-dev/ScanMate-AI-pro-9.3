@@ -35,3 +35,7 @@
     public void log(java.lang.String);
 }
 -dontwarn okhttp3.logging.**
+-dontwarn org.spongycastle.**
+-keep class org.spongycastle.crypto.** { *; }
+-keep class org.spongycastle.jce.** { *; }
+-keep class org.spongycastle.asn1.** { *; }
