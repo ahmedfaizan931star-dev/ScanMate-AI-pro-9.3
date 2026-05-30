@@ -1,0 +1,1278 @@
+diff --git a/CHANGES.md b/CHANGES.md
+index 72adfb5..e3832f2 100644
+--- a/CHANGES.md
++++ b/CHANGES.md
+@@ -1,77 +1,53 @@
+-# ScanMate AI Pro Principal Repair — 2026-05-29
+-
+-Full unified before/after diff is included in `PATCH_DIFF.md`.
+-
+-## Changed files and ranges
+-
+-1. `app/src/main/java/com/synthbyte/scanmate/utils/OcrHelper.kt`
+-   - Lines 43-68: `extractBlocksFromFile()` now returns `List<Pair<Rect, String>>` and preserves line text.
+-   - Lines 194-261: deskew now uses horizontal projection-profile variance over -10°..+10°.
+-
+-2. `app/src/main/java/com/synthbyte/scanmate/utils/FileUtils.kt`
+-   - Lines 247-288: PDF export OCR layer accepts real text blocks per image path.
+-   - Lines 321-339: invisible OCR layer draws the detected line text instead of a blank space.
+-
+-3. `app/src/main/java/com/synthbyte/scanmate/ui/viewmodels/DocumentDetailViewModel.kt`
+-   - Lines 21-29: added sealed `ExportState`.
+-   - Lines 37-145: moved OCR, PDF export, and DOCX export orchestration into the ViewModel using `viewModelScope` and IO dispatching.
+-
+-4. `app/src/main/java/com/synthbyte/scanmate/ui/screens/DocumentDetailScreen.kt`
+-   - Lines 112-174: observes `ExportState` and updates UI/toasts/clipboard from state.
+-   - Lines 187-229: overflow menu is anchored inside a `Box`.
+-   - Lines 283-323: export dialog now calls ViewModel export methods.
+-   - Removed previous top-level `extractOcr`, `exportPdf`, and `exportDocx` functions.
+-
+-5. `app/src/main/java/com/synthbyte/scanmate/ui/viewmodels/PageEditorViewModel.kt`
+-   - New file, lines 1-94: owns page state and page write/delete/replace/move/duplicate/OCR-save operations.
+-
+-6. `app/src/main/java/com/synthbyte/scanmate/ui/viewmodels/DocumentViewModelProvider.kt`
+-   - Lines 33-38: added `rememberPageEditorViewModel(docId, pageId)`.
+-
+-7. `app/src/main/java/com/synthbyte/scanmate/ui/screens/PageEditorScreen.kt`
+-   - Lines 70-76: uses `PageEditorViewModel` instead of direct DAO construction.
+-   - Lines 98-117, 179-201, 354-401, 491-499: routes page DB operations through the ViewModel.
+-   - Removed direct DAO helper functions from the composable file.
+-
+-8. `app/src/main/java/com/synthbyte/scanmate/ui/screens/CameraScreen.kt`
+-   - Lines 501-537: thumbnail strip uses remembered Coil `ImageRequest` with disk and memory cache keys.
+-
+-9. `app/src/main/java/com/synthbyte/scanmate/ui/screens/HomeScreen.kt`
+-   - Lines 185-188: empty state now calls standalone `HomeDocumentEmptyState(onNavigateToCamera)`.
+-
+-10. `app/src/main/java/com/synthbyte/scanmate/ui/screens/home/HomeDocumentList.kt`
+-    - Lines 42-74: created standalone `HomeDocumentEmptyState`; removed suppressed unused HomeDocumentList parameters.
+-
+-11. `app/src/main/java/com/synthbyte/scanmate/ui/screens/FileManagerScreen.kt`
+-    - Lines 5-65: added thumbnail-related imports.
+-    - Lines 248-284: added `FileThumb()` for image previews, PDF badge, and generic file icon.
+-    - Lines 298 and 326: list/grid cells now use `FileThumb()`.
+-
+-12. `app/build.gradle.kts`
+-    - Line 131: `libs.logging.interceptor` changed from `implementation` to `debugImplementation`.
+-
+-13. `app/src/main/java/com/synthbyte/scanmate/domain/GeminiApiService.kt`
+-    - Lines 1-101: Gemini API client now attaches logging only in debug through reflection, avoiding release dependency/logging.
+-
+-14. `app/proguard-rules.pro`
+-    - Lines 31-35: added logging-interceptor side-effect stripping and warning suppression.
+-
+-15. `app/src/main/java/com/synthbyte/scanmate/ui/screens/home/HomeHeroCard.kt`
+-    - Lines 83-106: removed `HeroStat` row and replaced it with a context-aware greeting and conditional pinned label.
+-
+-16. `app/src/main/java/com/synthbyte/scanmate/data/DocDao.kt`
+-    - Line 137: QR history query default limit is now 50.
+-
+-17. `app/src/main/java/com/synthbyte/scanmate/ui/viewmodels/DocumentViewModel.kt`
+-    - Lines 18-26: exposes `qrHistory` Flow from DAO.
+-
+-18. `app/src/main/java/com/synthbyte/scanmate/ui/screens/QrScreen.kt`
+-    - Lines 103-106: observes QR history from `DocumentViewModel`.
+-    - Lines 302-310: history timestamp format now matches `dd MMM HH:mm`.
+-
+-19. `app/src/main/java/com/synthbyte/scanmate/ui/components/GlobalErrorBoundary.kt`
+-    - New file, lines 1-61: adds recoverable Compose error fallback UI.
+-
+-20. `app/src/main/java/com/synthbyte/scanmate/MainActivity.kt`
+-    - Lines 32-33: imports `GlobalErrorBoundary`.
+-    - Lines 110-231: wraps `NavHost` in `GlobalErrorBoundary` without changing routes.
++# CHANGES — Principal Repair v2
++
++## FIX 1 — PageEditorScreen.kt + PageEditorViewModelProvider.kt + PageEditorViewModel.kt
++- Confirmed `PageEditorScreen.kt` has zero `AppDatabase` hits.
++- Moved `rememberPageEditorViewModel(docId, pageId)` into dedicated `PageEditorViewModelProvider.kt` following the provider pattern.
++- Removed the PageEditor provider helper from `DocumentViewModelProvider.kt`.
++- Kept PageEditor composable mutations routed through `PageEditorViewModel` methods: `saveEditedPage`, `replacePageImage`, `deleteCurrentPage`, `duplicatePage`, `movePage`, `savePageOcr`.
++- Added PageEditor async error state so ViewModel launch failures are surfaced to UI.
++
++## FIX 2 — DocumentDetailScreen.kt + DocumentDetailViewModel.kt
++- Added `reorderPage(pageId, newOrder)` to `DocumentDetailViewModel` with `viewModelScope.launch(Dispatchers.IO)` and page renumbering.
++- Replaced data-mutation `coroutineScope.launch` blocks in `DocumentDetailScreen.kt` page management with ViewModel launch methods and completion callbacks.
++- Remaining `coroutineScope.launch` hits are file/OCR UI export actions inside `OcrCard`.
++
++## FIX 3 — AppViewModel.kt + GlobalErrorBoundary.kt + MainActivity.kt + ViewModels
++- Added `AppViewModel` with `globalError: StateFlow<String?>`, `reportError`, and `clearError`.
++- Updated `GlobalErrorBoundary` to render either synchronous composition exceptions or async app errors.
++- Provided `AppViewModel` at the top of `MainActivity.setContent` and passed it into `GlobalErrorBoundary`.
++- Wrapped `DocumentDetailViewModel` `viewModelScope.launch` bodies in `runCatching` and publish errors through `ExportState.Error`.
++- Wrapped `PageEditorViewModel.deleteCurrentPage` launch body in `runCatching` and exposed a UI-visible error state.
++
++## FIX 4 — CameraScreen.kt
++- Replaced CapturedThumbnailStrip Coil model path usage with `ImageRequest.Builder(ctx).data(file).diskCacheKey(...).memoryCacheKey(...).crossfade(true).build()`.
++
++## FIX 5 — DocumentDetailScreen.kt
++- Ensured the MoreVert overflow `IconButton` and its `DropdownMenu` are anchored together inside a `Box`.
++- Updated icon content description to `More options`.
++
++## FIX 6 — FileManagerScreen.kt
++- Added `FileThumb(file, modifier)` that renders image previews, a PDF badge, or a fallback file icon by extension.
++- Replaced generic thumbnails in both list row and grid cell with `FileThumb(file, Modifier.size(48.dp, 60.dp))`.
++
++## FIX 7 — HomeDocumentList.kt + HomeScreen.kt
++- Added standalone `HomeDocumentEmptyState(onScanClick)` composable.
++- Home empty list now calls `item(key = "home_empty") { HomeDocumentEmptyState(onScanClick = onNavigateToCamera) }`.
++- Confirmed zero `@Suppress("UNUSED_PARAMETER")` annotations in `HomeDocumentList.kt`.
++
++## FIX 8 — HomeHeroCard.kt
++- Removed HeroStat boxes and replaced them with a context-aware greeting and pinned count text only when pinned documents exist.
++
++## FIX 9 — app/build.gradle.kts + GeminiApiService.kt + proguard-rules.pro
++- Confirmed logging interceptor dependency is `debugImplementation(libs.logging.interceptor)`.
++- Kept Gemini OkHttp logging behind `BuildConfig.DEBUG` using reflection so release source compilation does not require the debug-only logging artifact.
++- Added/normalized R8 no-side-effects rule for `HttpLoggingInterceptor.log(String)`.
++
++## FIX 10 — DocDao.kt + DocumentViewModel.kt + QrScreen.kt
++- Added fixed Room query `getQrHistory(): Flow<List<QrHistory>>` with `LIMIT 50`.
++- Confirmed `DocumentViewModel.qrHistory` exposes DAO QR history.
++- Added QR history `Recent` section to `QrScreen` with a copy `IconButton` per entry.
++
++## Verification
++- See `VERIFY_REPORT.md`.
++- Full exact unified diff is in `PRINCIPAL_REPAIR_DIFF.patch`.
+diff --git a/FILE_MANIFEST_AFTER.tsv b/FILE_MANIFEST_AFTER.tsv
+new file mode 100644
+index 0000000..915e6fb
+--- /dev/null
++++ b/FILE_MANIFEST_AFTER.tsv
+@@ -0,0 +1,142 @@
++ANDROID_COMPATIBILITY_NOTES.md	3031	4da2911feb592bc027f8a166ff6aaa85f20cd4e20a43350cd5b351b7240ebf8e
++AUDIT_REPORT.md	1569	f1dd0e4de710772ce01127ed77dec0d9fdac47cc3a6da14192c30fd418d7aecd
++BUILD_REPORT.md	813	c4fcb761c8f9a6e415bb0614f118cddc26490dc23ccbcda33be658b52bdca009
++CHANGES.md	3719	d9f915940b8bb617194cc10d51c95197049a3b5d6802a48686ac01d8feab72a5
++COLAB_BUILD_GUIDE.md	4857	1140c0d145ddd8d928697e247c493e83b91b397c651e8c5882b67b83199bfa4a
++DIFF_STAT.txt	1078	ccc83f73c5e6cf93d62a866581dcebe5003ea825e729d507536247058f5c66c5
++ELITE_FINAL_FIX_REPORT.md	6507	c69bca7dbad64ca34c1be898a25d45bc7ccd7acdb53d0fd638f2e19da7a8c881
++EXTREME_PREMIUM_UPGRADE_REPORT.md	4735	bcadeabc3c690a32c42f0e7b5f10d5352d504473486ceeee60d802f28f21d3a9
++FILE_MANIFEST_BEFORE.tsv	16686	a6774338e4212ad01e983e3110f02561a20cbc175542eb59266d5c2cda4b13e4
++FINAL_PLAYSTORE_POLISH_REPORT.md	6962	d2d8c578c7fc6b96b837ec09dd917a01f8d3931494c07f1f970d9b234eca6521
++GITHUB_ACTIONS_UPLOAD_NOTE.md	488	21d1621189d25fee7021db86725322a41fd9e7be789f1272d1f0ef20574435b5
++MISSING_PREMIUM_FEATURES_COMPLETION_REPORT.md	6972	4d4603da112923c6e9310e961c6be27c122474184024bd28578901d86aab9fa6
++PATCH_DIFF.md	65080	4cdb21671dc67b7117b1183b390f14557e50cc5d632acf4a63ffdef22bdcee1a
++PHASE_4_NO_SHRINK_FINAL_REPORT.md	2098	1753c2d351d5bca92b95b67673cad39b619a1b2884ea3c7df2ac88f465f5fa29
++PHASE_4_PRODUCTION_POLISH_REPORT.md	7157	f0cb9ba2d0daf2da8251ae573c78d9e003fd8637a5a555164f0cd1177af5a43d
++PRINCIPAL_AUDIT_AND_FIX_REPORT.md	4021	4a6476f03a834f47ff71f99c8de6504c8caa99da07cbe5f07524c76dbd670f24
++PRIVACY_NOTICE.md	908	2cddc1a97e11e3c9fcb0e113be4b8026e67764b868bde09cb8e12fcdcc78f480
++PRODUCTION_CHECKLIST.md	1518	62d740d445864e7bef1ad587cc3c7af7d570b670afdcbaa826648eeafc4946ba
++README.md	478	1c6cd790b9a7afd48d993970cae305c01c7a190b175d1bb32edd4a18e62515d7
++SCANMATE_AI_PRO_1_5_0_FINAL_VERIFICATION_REPORT.md	13045	857f1fa29f7bb4e36b591671998906852185b6e739fe126d6ba3dd1efa7fa7f2
++SCANMATE_AI_PRO_1_5_0_IMPLEMENTATION_REPORT.md	2910	905cb3e83b07d2caf498f6b613597be92f771d96f0fa5e015103e9169b78b9b1
++SCANMATE_AI_PRO_ANDROID_WEB_DESIGN_UPGRADE_REPORT.md	4560	79498c40ae6caadb6ac7eb1dae460932ed40024824b75fee92603cbf3fd7ee4b
++SIGNING_RELEASE_GUIDE.md	959	d6077c7e3abc72ac7c22675a40c66dbe8f198189b7ffa955f62f1dbc606db06a
++VERIFY_REPORT.md	2170	0abb033d24289c2acdb9961387206d8b420ec5ed086c25ffea9527b73eb41483
++app/build.gradle.kts	5584	58cf6229ab892b770c9b9c7f902bdad21f2c922d1ba01bcf505b0fb25d603104
++app/proguard-rules.pro	1398	74cc9134f17a15bdcacec697f7594f94be872be5b9b9ee397a998092239de2ab
++app/src/androidTest/java/com/synthbyte/scanmate/ScanMateInstrumentedTest.kt	505	4bc96261b1eec04cdb128ad0d4a81018e822779a140811c073a611462ccc652a
++app/src/main/AndroidManifest.xml	3263	5ae1eb7539a3e01498cd047fd3eb08be7c842f60bfdf6e9d3d195f95abca0b7e
++app/src/main/java/com/synthbyte/scanmate/MainActivity.kt	15891	e500086d3d4eb068c981b23d32d44c503dbb3b9a96bc40ad89b59a42d8eef248
++app/src/main/java/com/synthbyte/scanmate/data/AppDatabase.kt	2730	4807f9ecea8018d3fde5819e70f9974304c1efd4f08b8a0eb181b287767978d8
++app/src/main/java/com/synthbyte/scanmate/data/DocDao.kt	5871	fcc48f97afdedf55512ff803d897affe1092816bc893c5cce7fea37a53a966a8
++app/src/main/java/com/synthbyte/scanmate/data/Entities.kt	1455	7a42dcac3818200eba0734aa51701f034cba26f61e2d0860abfdacb78941a0fb
++app/src/main/java/com/synthbyte/scanmate/data/SettingsRepository.kt	3303	1df9c17531807ae64530cfd0b7172de01af1e232c81650b8f5047714cc899fe0
++app/src/main/java/com/synthbyte/scanmate/domain/GeminiApiService.kt	7526	173ab6e4ef374d0e76eec82e6ae1f5b397a47119293a7c6a93a997a8133375f2
++app/src/main/java/com/synthbyte/scanmate/domain/GeminiModels.kt	2304	ee6cb855dc1184772a00d68be4643f49594a7005332f5dd9a13790e558e3c24d
++app/src/main/java/com/synthbyte/scanmate/ui/components/DocumentOverlay.kt	2525	919fb35126a3bd50ff579891b3e9d6b58845051a28088dcb81242d8d0f6b5358
++app/src/main/java/com/synthbyte/scanmate/ui/components/GlobalErrorBoundary.kt	2744	d48059b8ddc7fbcd721780969e19514b59f680ef8004fe603e8d3962042e119b
++app/src/main/java/com/synthbyte/scanmate/ui/navigation/Routes.kt	902	83bba45b8e9c4816e25cb7c8c4f566cca64b078f98317ea649d33e53841bb15d
++app/src/main/java/com/synthbyte/scanmate/ui/screens/AiScreen.kt	16798	b3f57b8467121581b3d37e4cc477d574525b452798d4b35ed0a79f3c7312ac12
++app/src/main/java/com/synthbyte/scanmate/ui/screens/CameraScreen.kt	27846	4500eb590c8ad1958bc8abe5a1d8d05fdb1c088ae924b2cd5ff774acb0b4f48e
++app/src/main/java/com/synthbyte/scanmate/ui/screens/DocumentDetailScreen.kt	37122	31fa85cb0b83c552f404a952ffe33128c690133f783505abc7582ae2b3149e50
++app/src/main/java/com/synthbyte/scanmate/ui/screens/FileManagerScreen.kt	16581	db684a2df7c7faf4fb134e46153c0721b51c4ca9e4d617f852dfb0c6a575c749
++app/src/main/java/com/synthbyte/scanmate/ui/screens/HomeScreen.kt	9399	d4455435d425517f7f407d822f6a88867f845946308aa76886072bb5bfc99091
++app/src/main/java/com/synthbyte/scanmate/ui/screens/OcrTranslateScreen.kt	12985	577b62ca00674ad14b48673e7e1393f886540ff4654d327a973977afc0fe8ac8
++app/src/main/java/com/synthbyte/scanmate/ui/screens/OnboardingScreen.kt	8408	81e6eba5309facdcf0925d1f5e34ae57136ab93818b9a7cbabba82276fc47bc3
++app/src/main/java/com/synthbyte/scanmate/ui/screens/PageEditorScreen.kt	30466	f0049d0d5a90d769ec0265e4f32b4f887302ee9b8f912aa8b11de6d6fceee622
++app/src/main/java/com/synthbyte/scanmate/ui/screens/PdfToolsScreen.kt	25414	a363cfe311b092b0567ac51fcc01da216a42500729e01842de0ec8ce51238b5c
++app/src/main/java/com/synthbyte/scanmate/ui/screens/QrScannerScreen.kt	20656	bf736915b8149a2f4a079e455cd541ce2e7a68b9ba0d8241ead6b9fc626c49b9
++app/src/main/java/com/synthbyte/scanmate/ui/screens/QrScreen.kt	19193	35cc9b28c7cb72b78be97ec7594a9a7ea58a49480cee2104ab77fc4650de9dd3
++app/src/main/java/com/synthbyte/scanmate/ui/screens/SettingsScreen.kt	21985	02a5d7fc1a3b2801771ede035964ce7e8690f338df01efa2a0f6a9ce29cce5bb
++app/src/main/java/com/synthbyte/scanmate/ui/screens/SignatureScreen.kt	14054	5f8e475121d02e5585b92dd846b0f2b6b13646b8f3dd12899e76395ffabe6b50
++app/src/main/java/com/synthbyte/scanmate/ui/screens/ToolsScreen.kt	18596	8b7fc057bd219521008adddf80cc90a0585f8595bd5cc765d88c0321128d5008
++app/src/main/java/com/synthbyte/scanmate/ui/screens/VaultScreen.kt	9539	5c65f0a2d58cb8ee66ee299b7a5ab8e70dd78917ab5e96e3fbe858895f7480aa
++app/src/main/java/com/synthbyte/scanmate/ui/screens/ZipScreen.kt	6332	0ca28351d9cd4314be7e02aeeec1503b0fdc30e7e8157847dd36677f7c8736cb
++app/src/main/java/com/synthbyte/scanmate/ui/screens/home/HomeBottomNavigation.kt	3034	33909a5cfa88768aaa06aa208fae3992564772ee40b479f547b358deeb3a7730
++app/src/main/java/com/synthbyte/scanmate/ui/screens/home/HomeDocumentList.kt	8015	1581b6c38bd10bbc16ace9ca5601064530d890c1e0502ed6bf0400f2699098df
++app/src/main/java/com/synthbyte/scanmate/ui/screens/home/HomeHeaderZone.kt	3819	eb27eecb5260d4f615e83dfec347711807c38b868f9d72ac1a43036bfb360b61
++app/src/main/java/com/synthbyte/scanmate/ui/screens/home/HomeHeroCard.kt	4719	eeabae8e34e30b77e3cb01d8a7943bc6a6d447f85652971550c0b09d811bccbe
++app/src/main/java/com/synthbyte/scanmate/ui/screens/home/HomeLoadingSkeleton.kt	3003	04fd4cf91e84231a6a6f83fd653c05a2e535d0ec092e7cb2bf9e2b9f8a1276c6
++app/src/main/java/com/synthbyte/scanmate/ui/screens/home/HomeToolChipRow.kt	3690	862d10b0fc8b9778f2010312fb2d1fd02e4d4ee34e807b65705b89f9a7f618ed
++app/src/main/java/com/synthbyte/scanmate/ui/theme/Color.kt	1297	30585152188796a77a9eb9e95d37b0204f1b9716d2c0368c89944a4d9109d97b
++app/src/main/java/com/synthbyte/scanmate/ui/theme/Theme.kt	2845	2376a12759d4ecdf13d7b092a328a6f0fe9a58b67d4d5697165e5685ad4b9704
++app/src/main/java/com/synthbyte/scanmate/ui/theme/Type.kt	2848	52228f06f8dcf8ad1af428a2bfacdc01d9eb1bf8ecc796c072df6fb08b6e5de2
++app/src/main/java/com/synthbyte/scanmate/ui/viewmodels/AppViewModel.kt	531	bc14ab72b5ce3af8c2dd4bc8559d036f6650fad0a85205fb511c9fbd3d4bd2ce
++app/src/main/java/com/synthbyte/scanmate/ui/viewmodels/CameraViewModel.kt	2020	0ba5b4a0deb90a945e414611b14d623dd2d592c6bf59a5716d530b4c80bdc5c1
++app/src/main/java/com/synthbyte/scanmate/ui/viewmodels/DocumentDetailViewModel.kt	12611	0dcc786413cd306462b1697dadfe21f7230192a5c281a55c8718a4b81e90abb6
++app/src/main/java/com/synthbyte/scanmate/ui/viewmodels/DocumentViewModel.kt	5443	878847c3070bd4cc3954ebcbdebb2faf0dbd7f2eba0aee5f2dd10816dcf6a005
++app/src/main/java/com/synthbyte/scanmate/ui/viewmodels/DocumentViewModelProvider.kt	1141	1d9b1d4c6e880afddb5ef73f344d146165e68e826068204030cd9f9e33809d67
++app/src/main/java/com/synthbyte/scanmate/ui/viewmodels/PageEditorViewModel.kt	4153	978b3618b14174cdefa17f9cb26e62fe9b1c32d3c97719008d7401c101192a4f
++app/src/main/java/com/synthbyte/scanmate/ui/viewmodels/PageEditorViewModelProvider.kt	628	53773619389305dc80a0b629056cbae4ee1bfbeb6ebdc9a41c692d9d08620bef
++app/src/main/java/com/synthbyte/scanmate/util/EdgeAnalyzer.kt	7174	d7aa65bff6c93a02b8e251b0cce1adb37bd33772aa1bc2807a4f638c53b932e4
++app/src/main/java/com/synthbyte/scanmate/utils/BarcodeScannerHelper.kt	1679	19dd7e067c4aa7d03a808c619c73e4b267aeefd1cefc0d790963c173d8fad21c
++app/src/main/java/com/synthbyte/scanmate/utils/DocumentAnalytics.kt	2572	29f9aa442738120838102d69534867ec3074bee3362d010d4a6869ce166ba0b5
++app/src/main/java/com/synthbyte/scanmate/utils/DocumentIntelligence.kt	10934	09fccc3921000daf2957b6ac9031f50292d8957d90eb57517a01b47b68421545
++app/src/main/java/com/synthbyte/scanmate/utils/EncryptedVaultUtils.kt	3457	8dba7197c7e86472c20b06f29a9496b34d821e40c2f9376f48b702ea4c0f2d5c
++app/src/main/java/com/synthbyte/scanmate/utils/FileUtils.kt	67368	6a80ca621f5cc287e8f7229d3a5f45d98e9d741d6bb1ac1cba202d82f0bc2c7b
++app/src/main/java/com/synthbyte/scanmate/utils/MediaUtils.kt	4915	7b986ee6b9813ce9072bf264faff26b245c252010eb0c6d53f6b9fa3e1a851eb
++app/src/main/java/com/synthbyte/scanmate/utils/NetworkUtils.kt	659	585c3a2fa73b7f3e09cd684fb2c68d19b9c0645c78c3058c37d2fc5039d4680f
++app/src/main/java/com/synthbyte/scanmate/utils/OcrHelper.kt	12565	7ed4a361195b69d37b1f8d4c3e7562f3b5b593323ae55209c5afae6d72b3b3d9
++app/src/main/java/com/synthbyte/scanmate/utils/OcrTranslationEngine.kt	2204	7418db1f9ad489af43b93b5c540897ad97131cb89f15f2fac1d82b8e14924ad6
++app/src/main/java/com/synthbyte/scanmate/utils/QrPayloadParser.kt	5356	980a0524d1e6140c247628ebe480b0f885909fe3312acb110633873cec7bb916
++app/src/main/java/com/synthbyte/scanmate/widgets/AiActionWidgetProvider.kt	748	6e52a7a4552cdcf27aa939f7be8137df670720758c74dedba28369d9f942f69e
++app/src/main/java/com/synthbyte/scanmate/widgets/QuickScanWidgetProvider.kt	1337	edabdf0b8e7aa3ba1b675e989cb3513fe210a13e13fe408365655b2103a5ef03
++app/src/main/java/com/synthbyte/scanmate/widgets/RecentDocumentWidgetProvider.kt	971	b56ecdc14bd2a1dc32e87d244f8a06ffb95f52f61594f4dec69a0bdd36ac0f5f
++app/src/main/java/com/synthbyte/scanmate/widgets/WidgetStateStore.kt	2185	c481436980f742b251198e09e8a568121969ddad952bb4d94383a90fb47f7e6a
++app/src/main/res/drawable/ic_launcher_background.xml	329	b54da04a9dd8d5c2acf4b72a8349d98e234c16033d01f1edf7c688a926d68b8c
++app/src/main/res/drawable/ic_launcher_foreground.xml	286	f49bf37f4a229e2bc105cda8f9b09bf7ee08644404bb30f0f1654578414516b9
++app/src/main/res/drawable/ic_launcher_monochrome.xml	585	a4fbc2de847af10ceb41d049ed95cba392a4b3d292620316c127d437ec695c01
++app/src/main/res/drawable/logo_1779369607766.png	404149	c12dc5851e896c44e5914063e119128fc1e0b10c72c1c6c1e735917d3a1843d0
++app/src/main/res/font/nunito_extrabold.ttf	708920	0d977336a6d5fba34eab8e3199eb218327161b5143749f802982c2bc34df0c96
++app/src/main/res/font/nunito_regular.ttf	759720	abdc775b21b1bc470d50c97e790d276f2054b7504e56e5bd3e64f48d68582322
++app/src/main/res/layout/widget_ai_action.xml	823	c9fa2fd38d4f6c0426e333f0ed89d2dc50ef9b15e42058e308b7a5365731f54a
++app/src/main/res/layout/widget_quick_scan.xml	817	66ff775c202659dc230a4d03871f65025aedc781aa2e9336dddcd775bc8b99d1
++app/src/main/res/layout/widget_recent_document.xml	1040	eab7898d72e192ec0379ae0c3a8ded37bd9cfdf810761cceee9c8cae120b7a71
++app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml	344	ada31da9e23f4520f3753e71ca23799a107431473daa3774b6cecac26847260c
++app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml	344	ada31da9e23f4520f3753e71ca23799a107431473daa3774b6cecac26847260c
++app/src/main/res/mipmap-hdpi/ic_launcher.webp	2096	99221f2905af79868986b0dd1701ea91a5387146ba701c18b2ee2252a67be481
++app/src/main/res/mipmap-hdpi/ic_launcher_round.webp	4305	7c93f81de792b7216b0db55c1471abe5fccbbcde8278a25264d83ebf8464f498
++app/src/main/res/mipmap-mdpi/ic_launcher.webp	1485	b9089fe59f9049e993f92646161e0723496224a44436a2500087e2d05409e8f7
++app/src/main/res/mipmap-mdpi/ic_launcher_round.webp	2634	943bd647827e0e7f0fa51be8164f9f1835202d90af6d95ffae44dbb094f44060
++app/src/main/res/mipmap-xhdpi/ic_launcher.webp	2854	b3a0802c4fc82b3fd796cc2d57c0c1ea93e64fdfc46aab1e74a0bfa45fcef4f4
++app/src/main/res/mipmap-xhdpi/ic_launcher_round.webp	5934	2df674233ecc4e9fe6c8d4dfceb6c3257995e6613b0447b93c4a4893ff61c675
++app/src/main/res/mipmap-xxhdpi/ic_launcher.webp	4360	b479b07551ee8fd8ba4f96dc0e5d34ae675d485d8a341c369443b397a2defdbf
++app/src/main/res/mipmap-xxhdpi/ic_launcher_round.webp	8887	cb1b8197fa5009f511a5e9aea71e2eff952355cadaf776a83ab99db28fadb24f
++app/src/main/res/mipmap-xxxhdpi/ic_launcher.webp	5743	fe039e8aff6718652748d5d2daa5743cbf38759392a7feb723e7c032349b6e81
++app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.webp	11709	4d95c8cb035a1827eef9c0cf065e4be0f8fc0b86d6c420e9f3bccc366fba921d
++app/src/main/res/values/colors.xml	379	57681038afd005dcd260eabdd6d16619709c4a3fe20324362ea00e093e85b5fd
++app/src/main/res/values/font_certs.xml	2378	c7c76c6e68f018fa4710846e68dcd8181a16db278cb60cc54184360b209f5627
++app/src/main/res/values/strings.xml	242	dd218b1377bd9cb02e90413110e7120b4c6ba46f13047ee260eced8db0987dde
++app/src/main/res/values/themes.xml	708	7398c59c98dc3985a6f406ec5151f74f0ef707f1478bac193c7f95a70b60b730
++app/src/main/res/values-night/themes.xml	703	700a45a44b109779ac0154b911d93a2583882cabe2f452f2ea100c036a13a443
++app/src/main/res/xml/ai_action_widget_info.xml	418	6ff79237047b2bb392f5b7fe6db931a6bb2ccc9a7ab701d9205f293112c9f32f
++app/src/main/res/xml/backup_rules.xml	268	2bdab601b817a6e312ec8b8836edb22ff135c389496b3377090baeadc1c4014d
++app/src/main/res/xml/data_extraction_rules.xml	572	fffd1ae5ace26885bd01260691543bd0e6b3b8bfea7d079ce10c30d49671b84d
++app/src/main/res/xml/file_paths.xml	161	70697e5a65026227a1043d5115b0a20f41c291b1f967561f21f06985e33edd88
++app/src/main/res/xml/quick_scan_widget_info.xml	419	8564adaef9560bcd8833503478bd8f2ed7cd02bec4eff5312482192feebebbbe
++app/src/main/res/xml/recent_document_widget_info.xml	430	9b07c8dafb8405618920364d017bc8a2b5ddc70571fd7a6cbd3850ca475be494
++app/src/test/java/com/synthbyte/scanmate/GreetingScreenshotTest.kt	632	ff1f1352f3d2ae8866b1189279e0504582403f4187339bff11ce254de12942fc
++app/src/test/java/com/synthbyte/scanmate/ScanMateRobolectricTest.kt	622	550aad50fa45b19a780da77a0303ce6d6b0fdda8bb50581026ab60cd326a338c
++app/src/test/java/com/synthbyte/scanmate/ScanMateUnitTest.kt	338	bdb94e902f8d2edda22ea9096f8830ddb23ebc2bbec62b4cb0c9c5aede0b1ca4
++app/src/test/screenshots/greeting.png	2868	08b77a026d9f6bc52b9404021e164eaf16d033701ddc0cdb1caabe6f5e7ed01b
++assembleRelease.log	1960	6067df821cba285e6b31c7218cbaaf998d75cd9981fd39651d94c1719bcfd5f8
++build.gradle.kts	226	3194c8f9f3abbbde3d06661e2db450162985301a118ff5c7683700e850d770d0
++colab-build.ipynb	8106	23621aad6138843bf7f36a8742edc2cd77bdfd08f815979fca62cfd36f422d0a
++docs/phase4-production-polish/GITHUB_ACTIONS_BUILD_GUIDE.md	2059	7f7c7e3c79a24f43a7a84ab86343565cfb9312738eb279568d8dda40ee5d3a37
++docs/phase4-production-polish/MANUAL_DEVICE_TEST_PLAN.md	2236	136fbca1f9a810135849e4c7b90f38781b1256156fba7b2369c41bc6f040f984
++docs/phase4-production-polish/PLAY_STORE_PRODUCTION_QA_CHECKLIST.md	3797	3cae793a4909ae828371416ebd7638d725bf4e2e6bcdfff7475ce7eafc484f13
++docs/phase4-production-polish/PRODUCTION_QA_MATRIX.csv	35698	2fc7b4eb006b09bc4e61f164c4f6f4899f38728792769e16c2cd398fda9c7018
++docs/phase4-production-polish/RELEASE_NOTES_FOR_TESTERS.md	1009	dedf19d6eb4486337f504c7cdab9ee6bd3de8df62f134d8b6ce96dff0b6c94a9
++docs/phase4-production-polish/production_qa_matrix_visual.png	140791	6a2fed5327ff285170e294f8cff5ce8b89b6c67fccfaca3709d0ed48155cb0d3
++gradle/libs.versions.toml	5432	216912507deadbf8ab2ea36a6e857c54974042d4dc4af58318391dc58e2ca92a
++gradle/wrapper/gradle-wrapper.jar	4483	b14bc0309f251bc169c5eb289043e6a3427f3942f48e2cace2a14ab5e50e274f
++gradle/wrapper/gradle-wrapper.properties	250	3d91f0932da99885c41e9dc4e85c9f9a2d3bfef4f0ad87473014dc0827a94884
++gradle.properties	636	bdb6391861e02184e2b635f05b520ffdfeb051a3d54463f314dfdc3e65b694c9
++gradlew	2022	500d31f8f619b2164e9b6db6d9d16cfb96fef775c7719b0967d10da3ca0d9306
++gradlew.bat	2896	fedad02c18e266ec094995a5751b7fe1eb6e74f66bf75db64fae2e50eb22c234
++metadata.json	485	79cf787ae17b46e11c13cf91cb36860befb3b49a0b50991677280dd102fca4f0
++scripts/colab-build.sh	908	da21d09ccfe5cdbc111963aef578645ac65ad57c30f6251a1769ac7c01129deb
++scripts/doctor.sh	765	e41d4765a4cba8ed7daea7dcac8d8de03b68d9b7a3150031261dd53981c28e7f
++scripts/gradle-wrapper-fallback/GradleWrapperMain.java	6129	ecdf550a18030accfbeb45dd6cbd65181e732ea75b38fbeb4b42d0d4c7b15692
++settings.gradle.kts	333	74763def128e8a9506f7440fc5804bea5120e8fe73e65ca7d3751e716a0119d9
++static_verification.log	1128	e23d0414025468671a01e0c456b1735bf298e0d056107bf629499a25e343de39
+diff --git a/VERIFY_REPORT.md b/VERIFY_REPORT.md
+new file mode 100644
+index 0000000..0c857be
+--- /dev/null
++++ b/VERIFY_REPORT.md
+@@ -0,0 +1,51 @@
++# ScanMate AI Pro Principal Repair v2 Verification
++
++## File read pass
++- All files in the uploaded ZIP were read into `FILE_MANIFEST_BEFORE.tsv` with byte size and SHA-256 before code edits.
++- Total files read before edits: 138.
++
++## Grep verification
++
++```text
++1. grep -n "AppDatabase" app/src/main/java/com/synthbyte/scanmate/ui/screens/PageEditorScreen.kt
++   => zero hits
++
++2. grep -n "coroutineScope.launch" app/src/main/java/com/synthbyte/scanmate/ui/screens/DocumentDetailScreen.kt
++   => remaining hits are OCR/file export UI actions inside OcrCard only: Save TXT, Save DOCX, Save XLSX, Vault.
++
++3. AppViewModel.kt exists with MutableStateFlow<String?> and StateFlow<String?> globalError.
++
++4. GlobalErrorBoundary collects AppViewModel.globalError and uses activeError = sync composition error ?: async error.
++
++5. CapturedThumbnailStrip uses Coil ImageRequest with diskCacheKey and memoryCacheKey.
++
++6. DocumentDetailScreen MoreVert IconButton and DropdownMenu are wrapped in Box.
++
++7. FileManagerScreen FileThumb renders image previews, PDF badge, and file fallback icon.
++
++8. HomeDocumentEmptyState is standalone; HomeDocumentList.kt has zero @Suppress annotations.
++
++9. HomeHeroCard no longer contains HeroStat boxes; it uses a context-aware greeting.
++
++10. app/build.gradle.kts uses debugImplementation(libs.logging.interceptor).
++
++11. QrScreen displays QR history from DocumentViewModel.qrHistory with a copy IconButton.
++```
++
++## Build verification
++
++Command attempted:
++
++```bash
++./gradlew assembleRelease --warning-mode all
++```
++
++Result in this sandbox:
++
++```text
++Downloading Gradle distribution: https://services.gradle.org/distributions/gradle-8.9-bin.zip
++Exception in thread "main" java.io.IOException: Unable to download Gradle distribution. Check internet access or install Gradle 8.9 locally.
++Caused by: java.net.UnknownHostException: services.gradle.org
++```
++
++The release build could not be executed in this environment because there is no network access and no local Gradle 8.9 installation/cache. The source ZIP includes a minimal wrapper launcher that attempts to download Gradle, so offline build execution is blocked here before Android/Kotlin compilation begins.
+diff --git a/app/proguard-rules.pro b/app/proguard-rules.pro
+index d7e0276..1c82280 100644
+--- a/app/proguard-rules.pro
++++ b/app/proguard-rules.pro
+@@ -32,6 +32,6 @@
+ -keep class com.synthbyte.scanmate.widgets.** { *; }
+ 
+ -assumenosideeffects class okhttp3.logging.HttpLoggingInterceptor {
+-    void log(java.lang.String);
++    public void log(java.lang.String);
+ }
+ -dontwarn okhttp3.logging.**
+diff --git a/app/src/main/java/com/synthbyte/scanmate/MainActivity.kt b/app/src/main/java/com/synthbyte/scanmate/MainActivity.kt
+index aaeaf1e..95d4c33 100644
+--- a/app/src/main/java/com/synthbyte/scanmate/MainActivity.kt
++++ b/app/src/main/java/com/synthbyte/scanmate/MainActivity.kt
+@@ -27,9 +27,11 @@ import androidx.core.graphics.drawable.IconCompat
+ import androidx.navigation.compose.NavHost
+ import androidx.navigation.compose.composable
+ import androidx.navigation.compose.rememberNavController
++import androidx.lifecycle.viewmodel.compose.viewModel
+ import com.synthbyte.scanmate.data.SettingsRepository
+ import com.synthbyte.scanmate.data.ThemeMode
+ import com.synthbyte.scanmate.ui.components.GlobalErrorBoundary
++import com.synthbyte.scanmate.ui.viewmodels.AppViewModel
+ import com.synthbyte.scanmate.ui.navigation.Routes
+ import com.synthbyte.scanmate.ui.screens.AiScreen
+ import com.synthbyte.scanmate.ui.screens.CameraScreen
+@@ -71,6 +73,7 @@ class MainActivity : ComponentActivity() {
+         enableEdgeToEdge()
+         publishLauncherShortcuts()
+         setContent {
++            val appViewModel: AppViewModel = viewModel()
+             val themeMode by settingsRepository.themeModeFlow.collectAsState(initial = ThemeMode.SYSTEM)
+             val onboardingCompleteState by settingsRepository.onboardingCompleteFlow.collectAsState(initial = null)
+             val scope = rememberCoroutineScope()
+@@ -107,7 +110,7 @@ class MainActivity : ComponentActivity() {
+                         }
+ 
+                         val startDestination = if (onboardingComplete) Routes.HOME else Routes.ONBOARDING
+-                        GlobalErrorBoundary {
++                        GlobalErrorBoundary(appViewModel = appViewModel) {
+                         NavHost(navController = navController, startDestination = startDestination) {
+                         composable(Routes.ONBOARDING) {
+                             OnboardingScreen(
+diff --git a/app/src/main/java/com/synthbyte/scanmate/data/DocDao.kt b/app/src/main/java/com/synthbyte/scanmate/data/DocDao.kt
+index e7deb29..4d97e70 100644
+--- a/app/src/main/java/com/synthbyte/scanmate/data/DocDao.kt
++++ b/app/src/main/java/com/synthbyte/scanmate/data/DocDao.kt
+@@ -135,8 +135,8 @@ interface DocDao {
+     @Insert(onConflict = OnConflictStrategy.REPLACE)
+     suspend fun insertQrHistory(item: QrHistory): Long
+ 
+-    @Query("SELECT * FROM qr_history ORDER BY timestamp DESC LIMIT :limit")
+-    fun getQrHistory(limit: Int = 50): Flow<List<QrHistory>>
++    @Query("SELECT * FROM qr_history ORDER BY timestamp DESC LIMIT 50")
++    fun getQrHistory(): Flow<List<QrHistory>>
+ 
+     @Query("DELETE FROM qr_history")
+     suspend fun clearQrHistory()
+diff --git a/app/src/main/java/com/synthbyte/scanmate/ui/components/GlobalErrorBoundary.kt b/app/src/main/java/com/synthbyte/scanmate/ui/components/GlobalErrorBoundary.kt
+index 74bc90f..7be15e1 100644
+--- a/app/src/main/java/com/synthbyte/scanmate/ui/components/GlobalErrorBoundary.kt
++++ b/app/src/main/java/com/synthbyte/scanmate/ui/components/GlobalErrorBoundary.kt
+@@ -13,6 +13,7 @@ import androidx.compose.material3.Icon
+ import androidx.compose.material3.MaterialTheme
+ import androidx.compose.material3.Text
+ import androidx.compose.runtime.Composable
++import androidx.compose.runtime.collectAsState
+ import androidx.compose.runtime.getValue
+ import androidx.compose.runtime.mutableIntStateOf
+ import androidx.compose.runtime.mutableStateOf
+@@ -23,12 +24,19 @@ import androidx.compose.ui.Modifier
+ import androidx.compose.ui.text.font.FontWeight
+ import androidx.compose.ui.text.style.TextAlign
+ import androidx.compose.ui.unit.dp
++import androidx.lifecycle.viewmodel.compose.viewModel
++import com.synthbyte.scanmate.ui.viewmodels.AppViewModel
+ 
+ @Composable
+-fun GlobalErrorBoundary(content: @Composable () -> Unit) {
++fun GlobalErrorBoundary(
++    appViewModel: AppViewModel = viewModel(),
++    content: @Composable () -> Unit
++) {
+     var error by remember { mutableStateOf<Throwable?>(null) }
+     var retryKey by remember { mutableIntStateOf(0) }
+-    val activeError = error
++    val asyncError by appViewModel.globalError.collectAsState()
++    val activeError = error?.localizedMessage ?: asyncError
++
+     if (activeError == null) {
+         try {
+             androidx.compose.runtime.key(retryKey) { content() }
+@@ -46,13 +54,14 @@ fun GlobalErrorBoundary(content: @Composable () -> Unit) {
+             Text("Something went wrong", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold)
+             Spacer(Modifier.height(6.dp))
+             Text(
+-                activeError.localizedMessage ?: activeError::class.java.simpleName,
++                activeError,
+                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                 textAlign = TextAlign.Center
+             )
+             Spacer(Modifier.height(16.dp))
+             Button(onClick = {
+                 error = null
++                appViewModel.clearError()
+                 retryKey++
+             }) { Text("Try again") }
+         }
+diff --git a/app/src/main/java/com/synthbyte/scanmate/ui/screens/CameraScreen.kt b/app/src/main/java/com/synthbyte/scanmate/ui/screens/CameraScreen.kt
+index 8c11b2d..4823be0 100644
+--- a/app/src/main/java/com/synthbyte/scanmate/ui/screens/CameraScreen.kt
++++ b/app/src/main/java/com/synthbyte/scanmate/ui/screens/CameraScreen.kt
+@@ -525,22 +525,17 @@ private fun CapturedThumbnailStrip(capturedImages: List<File>) {
+             ) {
+                 itemsIndexed(capturedImages, key = { index, file -> "${file.absolutePath}_$index" }) { index, file ->
+                     Box {
+-                        val imageRequest = remember(file.absolutePath) {
+-                            ImageRequest.Builder(ctx)
+-                                .data(file)
+-                                .diskCacheKey(file.absolutePath)
+-                                .memoryCacheKey(file.absolutePath)
+-                                .crossfade(true)
+-                                .build()
+-                        }
+                         AsyncImage(
+-                            model = imageRequest,
+-                            contentDescription = "Captured page ${index + 1}",
+-                            modifier = Modifier
+-                                .width(52.dp)
+-                                .height(68.dp)
+-                                .clip(RoundedCornerShape(8.dp))
+-                                .background(MaterialTheme.colorScheme.surfaceVariant),
++                            model = remember(file.absolutePath) {
++                                ImageRequest.Builder(ctx)
++                                    .data(file)
++                                    .diskCacheKey(file.absolutePath)
++                                    .memoryCacheKey(file.absolutePath)
++                                    .crossfade(true)
++                                    .build()
++                            },
++                            contentDescription = "Page ${index + 1}",
++                            modifier = Modifier.size(52.dp, 68.dp).clip(RoundedCornerShape(8.dp)),
+                             contentScale = ContentScale.Crop
+                         )
+                         Text(
+diff --git a/app/src/main/java/com/synthbyte/scanmate/ui/screens/DocumentDetailScreen.kt b/app/src/main/java/com/synthbyte/scanmate/ui/screens/DocumentDetailScreen.kt
+index c21c97e..509f24a 100644
+--- a/app/src/main/java/com/synthbyte/scanmate/ui/screens/DocumentDetailScreen.kt
++++ b/app/src/main/java/com/synthbyte/scanmate/ui/screens/DocumentDetailScreen.kt
+@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.height
+ import androidx.compose.foundation.layout.offset
+ import androidx.compose.foundation.layout.padding
+ import androidx.compose.foundation.layout.size
+-import androidx.compose.foundation.layout.width
+ import androidx.compose.foundation.lazy.LazyRow
+ import androidx.compose.foundation.lazy.items
+ import androidx.compose.foundation.rememberScrollState
+@@ -90,6 +89,7 @@ import com.synthbyte.scanmate.data.Page
+ import com.synthbyte.scanmate.utils.DocumentAnalyticsEngine
+ import com.synthbyte.scanmate.utils.EncryptedVaultUtils
+ import com.synthbyte.scanmate.utils.FileUtils
++import com.synthbyte.scanmate.utils.OcrHelper
+ import com.synthbyte.scanmate.utils.PdfExportQuality
+ import com.synthbyte.scanmate.utils.PdfPageSize
+ import com.synthbyte.scanmate.ui.viewmodels.ExportState
+@@ -109,7 +109,6 @@ fun DocumentDetailScreen(
+     val context = LocalContext.current
+     val viewModel = rememberDocumentDetailViewModel(docId)
+     val documentWithPages by viewModel.documentWithPages.collectAsState(initial = null)
+-    val coroutineScope = rememberCoroutineScope()
+     val exportState by viewModel.exportState.collectAsState()
+     var isProcessing by remember { mutableStateOf(false) }
+     var showDeleteDialog by remember { mutableStateOf(false) }
+@@ -195,7 +194,7 @@ fun DocumentDetailScreen(
+                     }
+                     IconButton(onClick = { showExportDialog = true }) { Icon(Icons.Default.PictureAsPdf, "Export PDF") }
+                     Box {
+-                        IconButton(onClick = { topBarMenuExpanded = true }) { Icon(Icons.Default.MoreVert, "More") }
++                        IconButton(onClick = { topBarMenuExpanded = true }) { Icon(Icons.Default.MoreVert, "More options") }
+                         DropdownMenu(expanded = topBarMenuExpanded, onDismissRequest = { topBarMenuExpanded = false }) {
+                         DropdownMenuItem(
+                             text = { Text("Rename") },
+@@ -272,26 +271,22 @@ fun DocumentDetailScreen(
+                     pages = pages,
+                     onEdit = { page -> onNavigateToPageEditor(docId, page.id) },
+                     onMove = { page, direction ->
+-                        coroutineScope.launch {
+-                            viewModel.movePage(page, direction)
++                        viewModel.movePage(page, direction) {
+                             Toast.makeText(context, "Page order updated", Toast.LENGTH_SHORT).show()
+                         }
+                     },
+                     onReorder = { reorderedPages ->
+-                        coroutineScope.launch {
+-                            viewModel.reorderPages(reorderedPages)
++                        viewModel.reorderPages(reorderedPages) {
+                             Toast.makeText(context, "Drag reorder saved", Toast.LENGTH_SHORT).show()
+                         }
+                     },
+                     onDuplicate = { page ->
+-                        coroutineScope.launch {
+-                            viewModel.duplicatePage(page)
++                        viewModel.duplicatePage(page) {
+                             Toast.makeText(context, "Page duplicated", Toast.LENGTH_SHORT).show()
+                         }
+                     },
+                     onDelete = { page ->
+-                        coroutineScope.launch {
+-                            viewModel.deletePage(page.id)
++                        viewModel.deletePage(page.id) {
+                             Toast.makeText(context, "Page deleted", Toast.LENGTH_SHORT).show()
+                         }
+                     }
+@@ -546,7 +541,6 @@ private fun InsightPill(label: String, value: String, modifier: Modifier = Modif
+ private fun OcrCard(dwp: DocumentWithPages, clipboardManager: ClipboardManager, context: Context, onDocxReady: (File) -> Unit) {
+     val text = dwp.document.ocrText
+     val coroutineScope = rememberCoroutineScope()
+-    val exportState by viewModel.exportState.collectAsState()
+     if (!text.isNullOrBlank()) {
+         Card(modifier = Modifier.fillMaxWidth().padding(16.dp), shape = RoundedCornerShape(20.dp)) {
+             Column(modifier = Modifier.padding(16.dp)) {
+diff --git a/app/src/main/java/com/synthbyte/scanmate/ui/screens/FileManagerScreen.kt b/app/src/main/java/com/synthbyte/scanmate/ui/screens/FileManagerScreen.kt
+index b100317..f526784 100644
+--- a/app/src/main/java/com/synthbyte/scanmate/ui/screens/FileManagerScreen.kt
++++ b/app/src/main/java/com/synthbyte/scanmate/ui/screens/FileManagerScreen.kt
+@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.fillMaxSize
+ import androidx.compose.foundation.layout.fillMaxWidth
+ import androidx.compose.foundation.layout.height
+ import androidx.compose.foundation.layout.size
+-import androidx.compose.foundation.layout.width
+ import androidx.compose.foundation.layout.padding
+ import androidx.compose.foundation.lazy.LazyColumn
+ import androidx.compose.foundation.lazy.items
+@@ -252,42 +251,36 @@ private fun EmptyFilesCard(hasFiles: Boolean) {
+ @Composable
+ private fun FileThumb(file: File, modifier: Modifier = Modifier) {
+     val context = LocalContext.current
+-    val extension = file.extension.lowercase(Locale.getDefault())
+-    val imageExtensions = setOf("jpg", "jpeg", "png", "webp", "heic", "heif")
+-    Box(
+-        modifier = modifier
+-            .clip(RoundedCornerShape(10.dp))
+-            .background(MaterialTheme.colorScheme.surfaceVariant),
+-        contentAlignment = Alignment.Center
+-    ) {
+-        when {
+-            extension in imageExtensions -> {
+-                val request = remember(file.absolutePath) {
+-                    ImageRequest.Builder(context)
+-                        .data(file)
+-                        .diskCacheKey(file.absolutePath)
+-                        .memoryCacheKey(file.absolutePath)
+-                        .crossfade(true)
+-                        .build()
+-                }
+-                AsyncImage(
+-                    model = request,
+-                    contentDescription = file.name,
+-                    modifier = Modifier.matchParentSize(),
+-                    contentScale = ContentScale.Crop
+-                )
+-            }
+-            extension == "pdf" -> {
+-                Box(
+-                    modifier = Modifier
+-                        .matchParentSize()
+-                        .background(MaterialTheme.colorScheme.errorContainer),
+-                    contentAlignment = Alignment.Center
+-                ) {
+-                    Text("PDF", color = MaterialTheme.colorScheme.onErrorContainer, fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.labelMedium)
+-                }
+-            }
+-            else -> Icon(Icons.Default.InsertDriveFile, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
++    val ext = file.extension.lowercase()
++    when {
++        ext in listOf("jpg", "jpeg", "png", "webp") -> AsyncImage(
++            model = remember(file.absolutePath) {
++                ImageRequest.Builder(context)
++                    .data(file)
++                    .diskCacheKey(file.absolutePath)
++                    .crossfade(true)
++                    .build()
++            },
++            contentDescription = null,
++            modifier = modifier.clip(RoundedCornerShape(8.dp)),
++            contentScale = ContentScale.Crop
++        )
++        ext == "pdf" -> Box(
++            modifier.background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(8.dp)),
++            contentAlignment = Alignment.Center
++        ) {
++            Text(
++                "PDF",
++                style = MaterialTheme.typography.labelSmall,
++                fontWeight = FontWeight.ExtraBold,
++                color = MaterialTheme.colorScheme.primary
++            )
++        }
++        else -> Box(
++            modifier.background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp)),
++            contentAlignment = Alignment.Center
++        ) {
++            Icon(Icons.Default.InsertDriveFile, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+         }
+     }
+ }
+@@ -303,7 +296,7 @@ private fun ManagedFileRow(file: File, onOpen: () -> Unit, onShare: () -> Unit,
+         modifier = Modifier.fillMaxWidth()
+     ) {
+         Row(modifier = Modifier.padding(14.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+-            FileThumb(file = file, modifier = Modifier.width(48.dp).height(60.dp))
++            FileThumb(file = file, modifier = Modifier.size(48.dp, 60.dp))
+             Column(modifier = Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                 Text(file.name, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                 Text("${file.parentFile?.name ?: "App"} · $size · $date", color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+@@ -327,7 +320,7 @@ private fun ManagedFileGridCell(file: File, onOpen: () -> Unit, onShare: () -> U
+         modifier = Modifier.fillMaxWidth()
+     ) {
+         Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+-            FileThumb(file = file, modifier = Modifier.width(48.dp).height(60.dp))
++            FileThumb(file = file, modifier = Modifier.size(48.dp, 60.dp))
+             Text(file.name, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+             Text(size, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+             Text(date, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+diff --git a/app/src/main/java/com/synthbyte/scanmate/ui/screens/PageEditorScreen.kt b/app/src/main/java/com/synthbyte/scanmate/ui/screens/PageEditorScreen.kt
+index 1631ece..b73d53d 100644
+--- a/app/src/main/java/com/synthbyte/scanmate/ui/screens/PageEditorScreen.kt
++++ b/app/src/main/java/com/synthbyte/scanmate/ui/screens/PageEditorScreen.kt
+@@ -100,6 +100,7 @@ fun PageEditorScreen(docId: Long, pageId: Long, onNavigateBack: () -> Unit) {
+     val context = LocalContext.current
+     val viewModel = rememberPageEditorViewModel(docId, pageId)
+     val page by viewModel.page.collectAsState(initial = null)
++    val pageEditorError by viewModel.errorState.collectAsState()
+     val scope = rememberCoroutineScope()
+     val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+ 
+@@ -152,6 +153,13 @@ fun PageEditorScreen(docId: Long, pageId: Long, onNavigateBack: () -> Unit) {
+         onDispose { clearUndoRedoStacks() }
+     }
+ 
++    LaunchedEffect(pageEditorError) {
++        pageEditorError?.let { message ->
++            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
++            viewModel.clearError()
++        }
++    }
++
+     val replaceLauncher = rememberLauncherForActivityResult(
+         contract = ActivityResultContracts.PickVisualMedia()
+     ) { uri: Uri? ->
+diff --git a/app/src/main/java/com/synthbyte/scanmate/ui/screens/QrScreen.kt b/app/src/main/java/com/synthbyte/scanmate/ui/screens/QrScreen.kt
+index 5e21e95..485bf23 100644
+--- a/app/src/main/java/com/synthbyte/scanmate/ui/screens/QrScreen.kt
++++ b/app/src/main/java/com/synthbyte/scanmate/ui/screens/QrScreen.kt
+@@ -36,7 +36,6 @@ import androidx.compose.material.icons.filled.DeleteSweep
+ import androidx.compose.material.icons.filled.Link
+ import androidx.compose.material.icons.filled.PhotoLibrary
+ import androidx.compose.material.icons.filled.QrCode2
+-import androidx.compose.material.icons.filled.Share
+ import androidx.compose.material3.AssistChip
+ import androidx.compose.material3.Button
+ import androidx.compose.material3.Card
+@@ -44,7 +43,9 @@ import androidx.compose.material3.CardDefaults
+ import androidx.compose.material3.ExperimentalMaterial3Api
+ import androidx.compose.material3.FilterChip
+ import androidx.compose.material3.Icon
++import androidx.compose.material3.HorizontalDivider
+ import androidx.compose.material3.IconButton
++import androidx.compose.material3.ListItem
+ import androidx.compose.material3.MaterialTheme
+ import androidx.compose.material3.OutlinedButton
+ import androidx.compose.material3.OutlinedTextField
+@@ -103,7 +104,7 @@ fun QrScreen(onNavigateBack: () -> Unit, onOpenCameraScanner: () -> Unit) {
+     val context = LocalContext.current
+     val dao = remember { AppDatabase.getDatabase(context).docDao() }
+     val documentViewModel = rememberDocumentViewModel()
+-    val history by documentViewModel.qrHistory.collectAsState(initial = emptyList())
++    val qrHistory by documentViewModel.qrHistory.collectAsState(initial = emptyList())
+     val coroutineScope = rememberCoroutineScope()
+     val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+     val primaryArgb = MaterialTheme.colorScheme.primary.toArgb()
+@@ -290,13 +291,17 @@ fun QrScreen(onNavigateBack: () -> Unit, onOpenCameraScanner: () -> Unit) {
+                 }
+             }
+ 
+-            item(key = "qr_history_header") { Text("History", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
+-
+-            if (history.isEmpty()) {
+-                item(key = "qr_history_empty") { Text("No QR history yet. Generated and scanned values will appear here.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+-            } else {
+-                items(history, key = { it.id }) { item ->
+-                    HistoryRow(item = item, clipboardManager = clipboardManager, context = context)
++            if (qrHistory.isNotEmpty()) {
++                item(key = "qr_history_header") {
++                    Text(
++                        "Recent",
++                        style = MaterialTheme.typography.titleSmall,
++                        fontWeight = FontWeight.ExtraBold,
++                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
++                    )
++                }
++                items(qrHistory, key = { it.id }) { entry ->
++                    HistoryRow(item = entry, clipboardManager = clipboardManager, context = context)
+                 }
+             }
+         }
+@@ -342,20 +347,19 @@ private fun HistoryRow(item: QrHistory, clipboardManager: ClipboardManager, cont
+     val date = remember(item.timestamp) {
+         SimpleDateFormat("dd MMM HH:mm", Locale.getDefault()).format(Date(item.timestamp))
+     }
+-    Card(shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), modifier = Modifier.fillMaxWidth()) {
+-        Row(modifier = Modifier.padding(14.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+-            Icon(Icons.Default.QrCode2, null, tint = MaterialTheme.colorScheme.primary)
+-            Column(modifier = Modifier.weight(1f).padding(horizontal = 12.dp)) {
+-                Text(item.value, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
+-                Text("${item.type.lowercase(Locale.getDefault()).replaceFirstChar { it.titlecase(Locale.getDefault()) }} · $date", color = MaterialTheme.colorScheme.onSurfaceVariant)
+-            }
++    ListItem(
++        headlineContent = { Text(item.value, maxLines = 1, overflow = TextOverflow.Ellipsis) },
++        supportingContent = { Text("${item.type} · $date") },
++        trailingContent = {
+             IconButton(onClick = {
+                 clipboardManager.setPrimaryClip(ClipData.newPlainText("QR History", item.value))
+                 Toast.makeText(context, "Copied", Toast.LENGTH_SHORT).show()
+-            }) { Icon(Icons.Default.ContentCopy, "Copy") }
+-            IconButton(onClick = { FileUtils.shareText(context, item.value) }) { Icon(Icons.Default.Share, "Share") }
++            }) {
++                Icon(Icons.Default.ContentCopy, "Copy")
++            }
+         }
+-    }
++    )
++    HorizontalDivider()
+ }
+ 
+ private fun openSafeLink(context: Context, value: String) {
+diff --git a/app/src/main/java/com/synthbyte/scanmate/ui/screens/home/HomeDocumentList.kt b/app/src/main/java/com/synthbyte/scanmate/ui/screens/home/HomeDocumentList.kt
+index 6f57d25..dbfb72a 100644
+--- a/app/src/main/java/com/synthbyte/scanmate/ui/screens/home/HomeDocumentList.kt
++++ b/app/src/main/java/com/synthbyte/scanmate/ui/screens/home/HomeDocumentList.kt
+@@ -67,7 +67,7 @@ fun HomeDocumentEmptyState(onScanClick: () -> Unit) {
+                     fontWeight = FontWeight.ExtraBold
+                 )
+                 Text(
+-                    "Tap the Scan button to capture your first page. It will appear here instantly.",
++                    "Tap Scan to capture your first page. It will appear here instantly.",
+                     style = MaterialTheme.typography.bodySmall,
+                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                     textAlign = TextAlign.Center
+diff --git a/app/src/main/java/com/synthbyte/scanmate/ui/screens/home/HomeHeroCard.kt b/app/src/main/java/com/synthbyte/scanmate/ui/screens/home/HomeHeroCard.kt
+index 282614b..6351b09 100644
+--- a/app/src/main/java/com/synthbyte/scanmate/ui/screens/home/HomeHeroCard.kt
++++ b/app/src/main/java/com/synthbyte/scanmate/ui/screens/home/HomeHeroCard.kt
+@@ -1,7 +1,6 @@
+ package com.synthbyte.scanmate.ui.screens.home
+ 
+ import androidx.compose.foundation.BorderStroke
+-import androidx.compose.foundation.background
+ import androidx.compose.foundation.layout.Arrangement
+ import androidx.compose.foundation.layout.Column
+ import androidx.compose.foundation.layout.Row
+@@ -91,25 +90,21 @@ fun HomeHeroCard(
+ 
+             val greeting = when {
+                 documentCount == 0 -> "Ready to scan your first document"
+-                documentCount in 1..4 -> "You have $documentCount document${if (documentCount == 1) "" else "s"}"
++                documentCount < 5 -> "You have $documentCount document${if (documentCount == 1) "" else "s"}"
+                 else -> "$documentCount documents · $pageCount pages"
+             }
+-            Column(
+-                modifier = Modifier
+-                    .fillMaxWidth()
+-                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp))
+-                    .padding(vertical = 12.dp, horizontal = 14.dp),
+-                verticalArrangement = Arrangement.spacedBy(4.dp)
+-            ) {
+-                Text(greeting, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.ExtraBold, fontSize = 16.sp)
+-                if (pinnedCount > 0) {
+-                    Text(
+-                        "$pinnedCount pinned",
+-                        color = MaterialTheme.colorScheme.primary,
+-                        fontWeight = FontWeight.ExtraBold,
+-                        fontSize = 11.sp
+-                    )
+-                }
++            Text(
++                greeting,
++                style = MaterialTheme.typography.bodyMedium,
++                fontWeight = FontWeight.Bold,
++                color = MaterialTheme.colorScheme.onSurface
++            )
++            if (pinnedCount > 0) {
++                Text(
++                    "$pinnedCount pinned",
++                    style = MaterialTheme.typography.labelMedium,
++                    color = MaterialTheme.colorScheme.primary
++                )
+             }
+ 
+             toolContent()
+diff --git a/app/src/main/java/com/synthbyte/scanmate/ui/viewmodels/AppViewModel.kt b/app/src/main/java/com/synthbyte/scanmate/ui/viewmodels/AppViewModel.kt
+new file mode 100644
+index 0000000..5bb3789
+--- /dev/null
++++ b/app/src/main/java/com/synthbyte/scanmate/ui/viewmodels/AppViewModel.kt
+@@ -0,0 +1,19 @@
++package com.synthbyte.scanmate.ui.viewmodels
++
++import androidx.lifecycle.ViewModel
++import kotlinx.coroutines.flow.MutableStateFlow
++import kotlinx.coroutines.flow.StateFlow
++import kotlinx.coroutines.flow.asStateFlow
++
++class AppViewModel : ViewModel() {
++    private val _globalError = MutableStateFlow<String?>(null)
++    val globalError: StateFlow<String?> = _globalError.asStateFlow()
++
++    fun reportError(message: String) {
++        _globalError.value = message
++    }
++
++    fun clearError() {
++        _globalError.value = null
++    }
++}
+diff --git a/app/src/main/java/com/synthbyte/scanmate/ui/viewmodels/DocumentDetailViewModel.kt b/app/src/main/java/com/synthbyte/scanmate/ui/viewmodels/DocumentDetailViewModel.kt
+index 8bde388..d619994 100644
+--- a/app/src/main/java/com/synthbyte/scanmate/ui/viewmodels/DocumentDetailViewModel.kt
++++ b/app/src/main/java/com/synthbyte/scanmate/ui/viewmodels/DocumentDetailViewModel.kt
+@@ -39,28 +39,32 @@ class DocumentDetailViewModel(
+     private val _exportState = MutableStateFlow<ExportState>(ExportState.Idle)
+     val exportState: StateFlow<ExportState> = _exportState.asStateFlow()
+ 
+-
+-
+     fun clearExportState() {
+         _exportState.value = ExportState.Idle
+     }
+ 
++    private fun publishError(throwable: Throwable) {
++        _exportState.value = ExportState.Error(throwable.localizedMessage ?: "Unknown error")
++    }
++
+     fun exportDocx(dwp: DocumentWithPages?) = viewModelScope.launch {
+-        if (dwp == null) return@launch
+-        val text = dwp.document.ocrText.orEmpty().trim()
+-        if (text.isBlank()) {
+-            _exportState.value = ExportState.Error("Run OCR first, then export DOCX")
+-            return@launch
+-        }
+-        _exportState.value = ExportState.Loading("Preparing DOCX…")
+-        val file = withContext(Dispatchers.IO) {
+-            FileUtils.saveDocxText(
+-                context = context,
+-                text = text,
+-                filename = dwp.document.title.ifBlank { "ScanMate_${dwp.document.id}_${System.currentTimeMillis()}" }
+-            )
+-        }
+-        _exportState.value = if (file != null) ExportState.DocxSuccess(file) else ExportState.Error("DOCX export failed")
++        runCatching {
++            if (dwp == null) return@runCatching
++            val text = dwp.document.ocrText.orEmpty().trim()
++            if (text.isBlank()) {
++                _exportState.value = ExportState.Error("Run OCR first, then export DOCX")
++                return@runCatching
++            }
++            _exportState.value = ExportState.Loading("Preparing DOCX…")
++            val file = withContext(Dispatchers.IO) {
++                FileUtils.saveDocxText(
++                    context = context,
++                    text = text,
++                    filename = dwp.document.title.ifBlank { "ScanMate_${dwp.document.id}_${System.currentTimeMillis()}" }
++                )
++            }
++            _exportState.value = if (file != null) ExportState.DocxSuccess(file) else ExportState.Error("DOCX export failed")
++        }.onFailure { throwable -> publishError(throwable) }
+     }
+ 
+     fun exportPdf(
+@@ -69,102 +73,114 @@ class DocumentDetailViewModel(
+         filename: String,
+         pageSize: PdfPageSize = PdfPageSize.A4
+     ) = viewModelScope.launch {
+-        if (dwp == null) return@launch
+-        val pages = dwp.pages.sortedBy { it.pageOrder }
+-        if (pages.isEmpty()) {
+-            _exportState.value = ExportState.Error("No pages found to export")
+-            return@launch
+-        }
+-        _exportState.value = ExportState.Loading("Preparing PDF…")
+-        val imagePaths = pages.map { it.imagePath }
+-        val ocrBlocksByPath: Map<String, List<Pair<android.graphics.Rect, String>>> = withContext(Dispatchers.IO) {
+-            imagePaths.associateWith { path ->
+-                val pageFile = File(path)
+-                if (pageFile.exists() && pageFile.length() > 0L) {
+-                    OcrHelper.extractBlocksFromFile(context, pageFile)
+-                } else {
+-                    emptyList()
++        runCatching {
++            if (dwp == null) return@runCatching
++            val pages = dwp.pages.sortedBy { it.pageOrder }
++            if (pages.isEmpty()) {
++                _exportState.value = ExportState.Error("No pages found to export")
++                return@runCatching
++            }
++            _exportState.value = ExportState.Loading("Preparing PDF…")
++            val imagePaths = pages.map { it.imagePath }
++            val ocrBlocksByPath: Map<String, List<Pair<android.graphics.Rect, String>>> = withContext(Dispatchers.IO) {
++                imagePaths.associateWith { path ->
++                    val pageFile = File(path)
++                    if (pageFile.exists() && pageFile.length() > 0L) {
++                        OcrHelper.extractBlocksFromFile(context, pageFile)
++                    } else {
++                        emptyList()
++                    }
+                 }
+             }
+-        }
+-        _exportState.value = ExportState.Loading("Building PDF…")
+-        val pdfFile = withContext(Dispatchers.IO) {
+-            FileUtils.generatePdfFromPaths(
+-                context = context,
+-                imagePaths = imagePaths,
+-                filename = filename.ifBlank { FileUtils.sanitizeFileBaseName(dwp.document.title) },
+-                quality = quality,
+-                pageSize = pageSize,
+-                onProgress = { message -> _exportState.value = ExportState.Loading(message) },
+-                ocrRectsByPath = ocrBlocksByPath
+-            )
+-        }
+-        _exportState.value = if (pdfFile != null) ExportState.PdfSuccess(pdfFile) else ExportState.Error("PDF export failed. Check that pages are valid images.")
++            _exportState.value = ExportState.Loading("Building PDF…")
++            val pdfFile = withContext(Dispatchers.IO) {
++                FileUtils.generatePdfFromPaths(
++                    context = context,
++                    imagePaths = imagePaths,
++                    filename = filename.ifBlank { FileUtils.sanitizeFileBaseName(dwp.document.title) },
++                    quality = quality,
++                    pageSize = pageSize,
++                    onProgress = { message -> _exportState.value = ExportState.Loading(message) },
++                    ocrRectsByPath = ocrBlocksByPath
++                )
++            }
++            _exportState.value = if (pdfFile != null) ExportState.PdfSuccess(pdfFile) else ExportState.Error("PDF export failed. Check that pages are valid images.")
++        }.onFailure { throwable -> publishError(throwable) }
+     }
+ 
+     fun extractOcr(dwp: DocumentWithPages?) = viewModelScope.launch {
+-        if (dwp == null || dwp.pages.isEmpty()) {
+-            _exportState.value = ExportState.Error("No pages available for OCR")
+-            return@launch
+-        }
+-        _exportState.value = ExportState.Loading("Running OCR…")
+-        val pages = dwp.pages.sortedBy { it.pageOrder }
+-        val text = withContext(Dispatchers.IO) {
+-            pages.mapIndexedNotNull { index, page ->
+-                val file = File(page.imagePath)
+-                if (!file.exists() || file.length() == 0L) return@mapIndexedNotNull null
+-                val fileResult = OcrHelper.extractTextFromFile(context, file)
+-                val result = if (fileResult.startsWith("OCR failed", ignoreCase = true)) {
+-                    FileUtils.decodeSampledBitmap(file.absolutePath, 1800, 1800)?.let { bitmap ->
+-                        try {
+-                            OcrHelper.extractTextFromBitmap(bitmap)
+-                        } finally {
+-                            if (!bitmap.isRecycled) runCatching { bitmap.recycle() }
+-                        }
+-                    }.orEmpty()
+-                } else {
+-                    fileResult
+-                }
+-                if (result.isBlank() || result.startsWith("OCR failed", ignoreCase = true)) null else "Page ${index + 1}:\n$result"
+-            }.joinToString(separator = "\n\n")
+-        }
+-        if (text.isBlank()) {
+-            _exportState.value = ExportState.Error("No readable text found")
+-            return@launch
+-        }
+-        val stats = OcrHelper.buildStats(text)
+-        updateOcrAndMetadata(stats.text, dwp.document.workspace.ifBlank { "Inbox" })
+-        _exportState.value = ExportState.OcrSuccess(stats.text, stats.qualityLabel)
++        runCatching {
++            if (dwp == null || dwp.pages.isEmpty()) {
++                _exportState.value = ExportState.Error("No pages available for OCR")
++                return@runCatching
++            }
++            _exportState.value = ExportState.Loading("Running OCR…")
++            val pages = dwp.pages.sortedBy { it.pageOrder }
++            val text = withContext(Dispatchers.IO) {
++                pages.mapIndexedNotNull { index, page ->
++                    val file = File(page.imagePath)
++                    if (!file.exists() || file.length() == 0L) return@mapIndexedNotNull null
++                    val fileResult = OcrHelper.extractTextFromFile(context, file)
++                    val result = if (fileResult.startsWith("OCR failed", ignoreCase = true)) {
++                        FileUtils.decodeSampledBitmap(file.absolutePath, 1800, 1800)?.let { bitmap ->
++                            try {
++                                OcrHelper.extractTextFromBitmap(bitmap)
++                            } finally {
++                                if (!bitmap.isRecycled) runCatching { bitmap.recycle() }
++                            }
++                        }.orEmpty()
++                    } else {
++                        fileResult
++                    }
++                    if (result.isBlank() || result.startsWith("OCR failed", ignoreCase = true)) null else "Page ${index + 1}:\n$result"
++                }.joinToString(separator = "\n\n")
++            }
++            if (text.isBlank()) {
++                _exportState.value = ExportState.Error("No readable text found")
++                return@runCatching
++            }
++            val stats = OcrHelper.buildStats(text)
++            updateOcrAndMetadata(stats.text, dwp.document.workspace.ifBlank { "Inbox" })
++            _exportState.value = ExportState.OcrSuccess(stats.text, stats.qualityLabel)
++        }.onFailure { throwable -> publishError(throwable) }
+     }
+ 
+     fun setFavorite(favorite: Boolean) = viewModelScope.launch(Dispatchers.IO) {
+-        dao.setFavorite(docId, favorite)
++        runCatching { dao.setFavorite(docId, favorite) }
++            .onFailure { throwable -> publishError(throwable) }
+     }
+ 
+     fun setPinned(pinned: Boolean) = viewModelScope.launch(Dispatchers.IO) {
+-        dao.setPinned(docId, pinned)
++        runCatching { dao.setPinned(docId, pinned) }
++            .onFailure { throwable -> publishError(throwable) }
+     }
+ 
+     fun rename(title: String) = viewModelScope.launch(Dispatchers.IO) {
+-        dao.renameDocument(docId, title.trim().ifBlank { "Untitled Scan" })
++        runCatching { dao.renameDocument(docId, title.trim().ifBlank { "Untitled Scan" }) }
++            .onFailure { throwable -> publishError(throwable) }
+     }
+ 
+     fun updateMeta(category: String, tags: String, workspace: String) = viewModelScope.launch(Dispatchers.IO) {
+-        dao.updateCategoryTags(
+-            id = docId,
+-            category = category.trim().ifBlank { "General" },
+-            tags = tags.trim(),
+-            workspace = workspace.trim().ifBlank { "Inbox" }
+-        )
++        runCatching {
++            dao.updateCategoryTags(
++                id = docId,
++                category = category.trim().ifBlank { "General" },
++                tags = tags.trim(),
++                workspace = workspace.trim().ifBlank { "Inbox" }
++            )
++        }.onFailure { throwable -> publishError(throwable) }
+     }
+ 
+     fun delete(onDeleted: () -> Unit) = viewModelScope.launch(Dispatchers.IO) {
+-        dao.deleteDocumentById(docId)
+-        withContext(Dispatchers.Main) { onDeleted() }
++        runCatching {
++            dao.deleteDocumentById(docId)
++            withContext(Dispatchers.Main) { onDeleted() }
++        }.onFailure { throwable -> publishError(throwable) }
+     }
+ 
+     fun updateOcr(text: String) = viewModelScope.launch(Dispatchers.IO) {
+-        dao.updateOcrText(docId, text)
++        runCatching { dao.updateOcrText(docId, text) }
++            .onFailure { throwable -> publishError(throwable) }
+     }
+ 
+     suspend fun updateOcrAndMetadata(text: String, currentWorkspace: String) = withContext(Dispatchers.IO) {
+@@ -175,16 +191,52 @@ class DocumentDetailViewModel(
+     }
+ 
+     fun updatePageImage(pageId: Long, imagePath: String) = viewModelScope.launch(Dispatchers.IO) {
+-        dao.updatePageImage(pageId, imagePath)
++        runCatching { dao.updatePageImage(pageId, imagePath) }
++            .onFailure { throwable -> publishError(throwable) }
++    }
++
++    fun deletePage(pageId: Long, onDone: () -> Unit = {}) = viewModelScope.launch(Dispatchers.IO) {
++        runCatching {
++            deletePageInternal(pageId)
++            withContext(Dispatchers.Main) { onDone() }
++        }.onFailure { throwable -> publishError(throwable) }
++    }
++
++    fun duplicatePage(page: Page, onDone: () -> Unit = {}) = viewModelScope.launch(Dispatchers.IO) {
++        runCatching {
++            duplicatePageInternal(page)
++            withContext(Dispatchers.Main) { onDone() }
++        }.onFailure { throwable -> publishError(throwable) }
++    }
++
++    fun movePage(page: Page, direction: Int, onDone: () -> Unit = {}) = viewModelScope.launch(Dispatchers.IO) {
++        runCatching {
++            movePageInternal(page, direction)
++            withContext(Dispatchers.Main) { onDone() }
++        }.onFailure { throwable -> publishError(throwable) }
++    }
++
++    fun reorderPage(pageId: Long, newOrder: Int) = viewModelScope.launch(Dispatchers.IO) {
++        runCatching {
++            dao.updatePageOrder(pageId, newOrder)
++            renumberPages()
++        }.onFailure { throwable -> publishError(throwable) }
+     }
+ 
+-    suspend fun deletePage(pageId: Long) = withContext(Dispatchers.IO) {
++    fun reorderPages(pages: List<Page>, onDone: () -> Unit = {}) = viewModelScope.launch(Dispatchers.IO) {
++        runCatching {
++            pages.forEachIndexed { order, page -> dao.updatePageOrder(page.id, order) }
++            withContext(Dispatchers.Main) { onDone() }
++        }.onFailure { throwable -> publishError(throwable) }
++    }
++
++    private suspend fun deletePageInternal(pageId: Long) {
+         dao.deletePageById(pageId)
+-        renumberPagesInternal()
++        renumberPages()
+     }
+ 
+-    suspend fun duplicatePage(page: Page) = withContext(Dispatchers.IO) {
+-        val copied = FileUtils.duplicateImageFile(context, page.imagePath) ?: return@withContext
++    private suspend fun duplicatePageInternal(page: Page) {
++        val copied = FileUtils.duplicateImageFile(context, page.imagePath) ?: return
+         val pages = dao.getPagesForDocumentOnce(docId).sortedBy { it.pageOrder }
+         val insertIndex = pages.indexOfFirst { it.id == page.id }.takeIf { it >= 0 }?.plus(1) ?: pages.size
+         pages.forEachIndexed { index, existing ->
+@@ -192,25 +244,21 @@ class DocumentDetailViewModel(
+             dao.updatePageOrder(existing.id, order)
+         }
+         dao.insertPage(Page(documentId = docId, imagePath = copied.absolutePath, pageOrder = insertIndex))
+-        renumberPagesInternal()
++        renumberPages()
+     }
+ 
+-    suspend fun movePage(page: Page, direction: Int) = withContext(Dispatchers.IO) {
++    private suspend fun movePageInternal(page: Page, direction: Int) {
+         val pages = dao.getPagesForDocumentOnce(docId).sortedBy { it.pageOrder }.toMutableList()
+         val index = pages.indexOfFirst { it.id == page.id }
+-        if (index < 0) return@withContext
++        if (index < 0) return
+         val newIndex = (index + direction).coerceIn(0, pages.lastIndex)
+-        if (index == newIndex) return@withContext
++        if (index == newIndex) return
+         val current = pages.removeAt(index)
+         pages.add(newIndex, current)
+         pages.forEachIndexed { order, existing -> dao.updatePageOrder(existing.id, order) }
+     }
+ 
+-    suspend fun reorderPages(pages: List<Page>) = withContext(Dispatchers.IO) {
+-        pages.forEachIndexed { order, page -> dao.updatePageOrder(page.id, order) }
+-    }
+-
+-    private suspend fun renumberPagesInternal() {
++    private suspend fun renumberPages() {
+         dao.getPagesForDocumentOnce(docId).sortedBy { it.pageOrder }.forEachIndexed { index, page ->
+             dao.updatePageOrder(page.id, index)
+         }
+diff --git a/app/src/main/java/com/synthbyte/scanmate/ui/viewmodels/DocumentViewModelProvider.kt b/app/src/main/java/com/synthbyte/scanmate/ui/viewmodels/DocumentViewModelProvider.kt
+index 2417b0b..be819d3 100644
+--- a/app/src/main/java/com/synthbyte/scanmate/ui/viewmodels/DocumentViewModelProvider.kt
++++ b/app/src/main/java/com/synthbyte/scanmate/ui/viewmodels/DocumentViewModelProvider.kt
+@@ -27,11 +27,3 @@ fun rememberCameraViewModel(): CameraViewModel {
+     val dao = remember { AppDatabase.getDatabase(context).docDao() }
+     return viewModel(factory = CameraViewModelFactory(dao, context))
+ }
+-
+-
+-@Composable
+-fun rememberPageEditorViewModel(docId: Long, pageId: Long): PageEditorViewModel {
+-    val context = LocalContext.current.applicationContext
+-    val dao = remember { AppDatabase.getDatabase(context).docDao() }
+-    return viewModel(key = "page-editor-$docId-$pageId", factory = PageEditorViewModelFactory(dao, context, docId, pageId))
+-}
+diff --git a/app/src/main/java/com/synthbyte/scanmate/ui/viewmodels/PageEditorViewModel.kt b/app/src/main/java/com/synthbyte/scanmate/ui/viewmodels/PageEditorViewModel.kt
+index d7eaca8..e58c196 100644
+--- a/app/src/main/java/com/synthbyte/scanmate/ui/viewmodels/PageEditorViewModel.kt
++++ b/app/src/main/java/com/synthbyte/scanmate/ui/viewmodels/PageEditorViewModel.kt
+@@ -10,6 +10,9 @@ import com.synthbyte.scanmate.data.Page
+ import com.synthbyte.scanmate.utils.FileUtils
+ import kotlinx.coroutines.Dispatchers
+ import kotlinx.coroutines.flow.Flow
++import kotlinx.coroutines.flow.MutableStateFlow
++import kotlinx.coroutines.flow.StateFlow
++import kotlinx.coroutines.flow.asStateFlow
+ import kotlinx.coroutines.launch
+ import kotlinx.coroutines.withContext
+ 
+@@ -20,6 +23,12 @@ class PageEditorViewModel(
+     pageId: Long
+ ) : ViewModel() {
+     val page: Flow<Page?> = dao.getPage(pageId)
++    private val _errorState = MutableStateFlow<String?>(null)
++    val errorState: StateFlow<String?> = _errorState.asStateFlow()
++
++    fun clearError() {
++        _errorState.value = null
++    }
+ 
+     suspend fun saveEditedPage(pageId: Long, bitmap: android.graphics.Bitmap): java.io.File? = withContext(Dispatchers.IO) {
+         val file = FileUtils.saveEditedBitmap(context, bitmap, "PAGE_${pageId}")
+@@ -34,9 +43,13 @@ class PageEditorViewModel(
+     }
+ 
+     fun deleteCurrentPage(pageId: Long, onDone: () -> Unit = {}) = viewModelScope.launch(Dispatchers.IO) {
+-        dao.deletePageById(pageId)
+-        renumberPagesInternal()
+-        withContext(Dispatchers.Main) { onDone() }
++        runCatching {
++            dao.deletePageById(pageId)
++            renumberPagesInternal()
++            withContext(Dispatchers.Main) { onDone() }
++        }.onFailure { throwable ->
++            _errorState.value = throwable.localizedMessage ?: "Unknown error"
++        }
+     }
+ 
+     suspend fun duplicatePage(page: Page) = withContext(Dispatchers.IO) {
+diff --git a/app/src/main/java/com/synthbyte/scanmate/ui/viewmodels/PageEditorViewModelProvider.kt b/app/src/main/java/com/synthbyte/scanmate/ui/viewmodels/PageEditorViewModelProvider.kt
+new file mode 100644
+index 0000000..e6e5d0a
+--- /dev/null
++++ b/app/src/main/java/com/synthbyte/scanmate/ui/viewmodels/PageEditorViewModelProvider.kt
+@@ -0,0 +1,14 @@
++package com.synthbyte.scanmate.ui.viewmodels
++
++import androidx.compose.runtime.Composable
++import androidx.compose.runtime.remember
++import androidx.compose.ui.platform.LocalContext
++import androidx.lifecycle.viewmodel.compose.viewModel
++import com.synthbyte.scanmate.data.AppDatabase
++
++@Composable
++fun rememberPageEditorViewModel(docId: Long, pageId: Long): PageEditorViewModel {
++    val context = LocalContext.current.applicationContext
++    val dao = remember { AppDatabase.getDatabase(context).docDao() }
++    return viewModel(key = "page-editor-$docId-$pageId", factory = PageEditorViewModelFactory(dao, context, docId, pageId))
++}

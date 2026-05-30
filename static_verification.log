@@ -1,0 +1,25 @@
+PASS: HomeScreen removed home_documents wrapper
+PASS: HomeDocumentList removed forEach document rendering
+PASS: HomeScreen uses top-level items for visibleDocuments
+PASS: DocumentDetailScreen raw CoroutineScope launch removed
+PASS: PDF export extracts OCR blocks per page
+PASS: PDF export passes OCR rect map to FileUtils
+PASS: FileUtils applyPerspectiveCorrection exists
+PASS: CameraScreen calls perspective correction after capture
+PASS: PageEditor undo snapshots scaled to maxSide 900
+PASS: PageEditor undo stack caps at 5
+PASS: Screens receive SettingsRepository from MainActivity
+PASS: AiScreen has WorkflowChipGrid
+PASS: AiScreen load from last scan button exists
+PASS: AiScreen offline banner exists
+PASS: ToolsScreen coming soon labels added
+PASS: ToolsScreen disabled alpha 0.45 exists
+PASS: Camera thumbnail strip exists
+PASS: Camera thumbnail LazyRow exists
+PASS: FileManager sort modes exist
+PASS: FileManager grid mode exists
+PASS: FileManager size formatting exists
+PASS: Proguard Coil rules exist
+PASS: Proguard Compose stability rules exist
+PASS: Crash log truncation runs on background Thread
+Checks passed: 24
