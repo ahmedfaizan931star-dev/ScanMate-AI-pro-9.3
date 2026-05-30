@@ -5,7 +5,7 @@ import com.synthbyte.scanmate.ui.viewmodels.AppErrorReporter
 import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
-import dagger.hilt.components.ActivityRetainedComponent
+import dagger.hilt.android.components.ActivityRetainedComponent
 
 @Module
 @InstallIn(ActivityRetainedComponent::class)
