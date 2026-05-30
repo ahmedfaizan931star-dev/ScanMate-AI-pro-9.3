@@ -39,3 +39,6 @@
 -keep class org.spongycastle.crypto.** { *; }
 -keep class org.spongycastle.jce.** { *; }
 -keep class org.spongycastle.asn1.** { *; }
+-dontwarn org.spongycastle.**
+-keep class org.spongycastle.** { *; }
+-keep class com.itextpdf.** { *; }
