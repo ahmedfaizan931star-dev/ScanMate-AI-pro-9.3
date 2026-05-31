@@ -1,0 +1,378 @@
+--- /mnt/data/scanmate_before/AndroidManifest.xml	2026-05-30 14:59:47.196832209 +0000
++++ app/src/main/AndroidManifest.xml	2026-05-30 15:02:11.839194236 +0000
+@@ -5,6 +5,8 @@
+     <uses-permission android:name="android.permission.INTERNET" />
+     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+     <uses-permission android:name="android.permission.CAMERA" />
++    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
++    <uses-permission android:name="android.permission.USE_FINGERPRINT" />
+     <uses-feature android:name="android.hardware.camera" android:required="false" />
+ 
+     <application
+@@ -15,6 +17,7 @@
+         android:hardwareAccelerated="true"
+         android:icon="@mipmap/ic_launcher"
+         android:label="@string/app_name"
++        android:networkSecurityConfig="@xml/network_security_config"
+         android:roundIcon="@mipmap/ic_launcher_round"
+         android:supportsRtl="true"
+         android:theme="@style/Theme.ScanMate"
+--- /mnt/data/scanmate_before/proguard-rules.pro	2026-05-30 14:59:47.210913959 +0000
++++ app/proguard-rules.pro	2026-05-30 15:01:27.298414774 +0000
+@@ -42,3 +42,12 @@
+ -dontwarn org.spongycastle.**
+ -keep class org.spongycastle.** { *; }
+ -keep class com.itextpdf.** { *; }
++
++# Security/runtime keep rules for password-protected PDF export and encrypted preferences.
++-dontwarn com.itextpdf.**
++-keep class org.bouncycastle.** { *; }
++-dontwarn org.bouncycastle.**
++-keep class androidx.security.crypto.** { *; }
++-dontwarn androidx.security.crypto.**
++-keep class com.google.crypto.tink.** { *; }
++-dontwarn com.google.crypto.tink.**
+--- /mnt/data/scanmate_before/PdfExporter.kt	2026-05-30 14:59:47.226064770 +0000
++++ app/src/main/java/com/synthbyte/scanmate/utils/PdfExporter.kt	2026-05-30 15:01:27.299203178 +0000
+@@ -36,9 +36,9 @@
+             val reader = com.itextpdf.text.pdf.PdfReader(base.absolutePath)
+             val stamper = com.itextpdf.text.pdf.PdfStamper(reader, out.outputStream())
+             stamper.setEncryption(
+-                userPassword.toByteArray(),
+-                "${userPassword}_owner".toByteArray(),
+-                com.itextpdf.text.pdf.PdfWriter.ALLOW_PRINTING or com.itextpdf.text.pdf.PdfWriter.ALLOW_COPY,
++                userPassword.toByteArray(Charsets.UTF_8),
++                ByteArray(32).also { java.security.SecureRandom().nextBytes(it) },
++                com.itextpdf.text.pdf.PdfWriter.ALLOW_PRINTING or com.itextpdf.text.pdf.PdfWriter.ALLOW_PRINTING,
+                 com.itextpdf.text.pdf.PdfWriter.ENCRYPTION_AES_128
+             )
+             stamper.close()
+--- /mnt/data/scanmate_before/DocumentDetailScreen.kt	2026-05-30 14:59:47.240397463 +0000
++++ app/src/main/java/com/synthbyte/scanmate/ui/screens/DocumentDetailScreen.kt	2026-05-30 15:01:27.300514713 +0000
+@@ -76,6 +76,7 @@
+ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+ import androidx.compose.ui.input.pointer.pointerInput
+ import androidx.compose.ui.Modifier
++import androidx.compose.ui.graphics.Color
+ import androidx.compose.ui.graphics.asImageBitmap
+ import androidx.compose.ui.layout.ContentScale
+ import androidx.compose.ui.platform.LocalContext
+@@ -133,6 +134,9 @@
+     var selectedPageSize by remember { mutableStateOf(PdfPageSize.A4) }
+     var passwordProtect by remember { mutableStateOf(false) }
+     var pdfPassword by remember { mutableStateOf("") }
++    var confirmPassword by remember { mutableStateOf("") }
++    val passwordValid = pdfPassword.length >= 6
++    val passwordsMatch = confirmPassword == pdfPassword
+     var topBarMenuExpanded by remember { mutableStateOf(false) }
+     var category by remember { mutableStateOf("General") }
+     var tags by remember { mutableStateOf("") }
+@@ -406,22 +410,52 @@
+                         Text("Password protect PDF", style = MaterialTheme.typography.bodyMedium)
+                     }
+                     AnimatedVisibility(visible = passwordProtect) {
+-                        OutlinedTextField(
+-                            value = pdfPassword,
+-                            onValueChange = { pdfPassword = it },
+-                            label = { Text("PDF Password") },
+-                            visualTransformation = PasswordVisualTransformation(),
+-                            modifier = Modifier.fillMaxWidth()
+-                        )
++                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
++                            OutlinedTextField(
++                                value = pdfPassword,
++                                onValueChange = { pdfPassword = it },
++                                label = { Text("PDF Password") },
++                                visualTransformation = PasswordVisualTransformation(),
++                                isError = pdfPassword.isNotEmpty() && !passwordValid,
++                                modifier = Modifier.fillMaxWidth()
++                            )
++                            if (pdfPassword.isNotEmpty() && !passwordValid) {
++                                Text("Minimum 6 characters required", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
++                            }
++                            if (pdfPassword.length >= 6) {
++                                val passwordStrength = when {
++                                    pdfPassword.length >= 12 && pdfPassword.any { it.isDigit() } && pdfPassword.any { !it.isLetterOrDigit() } -> Triple("Strong", 1f, Color(0xFF4CAF50))
++                                    pdfPassword.length >= 8 && (pdfPassword.any { it.isDigit() } || pdfPassword.any { !it.isLetterOrDigit() }) -> Triple("Fair", 0.6f, Color(0xFFFF9800))
++                                    else -> Triple("Weak", 0.3f, Color(0xFFF44336))
++                                }
++                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
++                                    LinearProgressIndicator(progress = { passwordStrength.second }, modifier = Modifier.weight(1f).height(4.dp), color = passwordStrength.third, trackColor = MaterialTheme.colorScheme.surfaceVariant)
++                                    Text(passwordStrength.first, style = MaterialTheme.typography.labelSmall, color = passwordStrength.third, fontWeight = FontWeight.Bold)
++                                }
++                            }
++                            OutlinedTextField(
++                                value = confirmPassword,
++                                onValueChange = { confirmPassword = it },
++                                label = { Text("Confirm Password") },
++                                visualTransformation = PasswordVisualTransformation(),
++                                isError = confirmPassword.isNotEmpty() && !passwordsMatch,
++                                supportingText = { if (confirmPassword.isNotEmpty() && !passwordsMatch) Text("Passwords do not match") },
++                                modifier = Modifier.fillMaxWidth()
++                            )
++                        }
+                     }
+                     Text("Choose quality", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                     PdfExportQuality.entries.forEach { quality ->
+                         OutlinedButton(onClick = {
+-                            showExportDialog = false
+-                            if (passwordProtect && pdfPassword.isNotBlank()) {
+-                                viewModel.exportProtectedPdf(documentWithPages, pdfPassword, exportName)
++                            if (passwordProtect && (!passwordValid || !passwordsMatch)) {
++                                Toast.makeText(context, "Enter matching password of at least 6 characters", Toast.LENGTH_SHORT).show()
+                             } else {
+-                                viewModel.exportPdf(documentWithPages, quality, exportName, selectedPageSize)
++                                showExportDialog = false
++                                if (passwordProtect && passwordValid && passwordsMatch) {
++                                    viewModel.exportProtectedPdf(documentWithPages, pdfPassword, exportName)
++                                } else {
++                                    viewModel.exportPdf(documentWithPages, quality, exportName, selectedPageSize)
++                                }
+                             }
+                         }, modifier = Modifier.fillMaxWidth()) {
+                             Column(horizontalAlignment = Alignment.Start, modifier = Modifier.fillMaxWidth()) {
+--- /mnt/data/scanmate_before/EncryptedVaultUtils.kt	2026-05-30 14:59:47.257241531 +0000
++++ app/src/main/java/com/synthbyte/scanmate/utils/EncryptedVaultUtils.kt	2026-05-30 15:01:27.301290522 +0000
+@@ -1,6 +1,7 @@
+ package com.synthbyte.scanmate.utils
+ 
+ import android.content.Context
++import android.os.Build
+ import android.security.keystore.KeyGenParameterSpec
+ import android.security.keystore.KeyProperties
+ import android.util.Base64
+@@ -66,14 +67,19 @@
+         (keyStore.getEntry(KEY_ALIAS, null) as? KeyStore.SecretKeyEntry)?.secretKey?.let { return it }
+ 
+         val keyGenerator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
+-        val spec = KeyGenParameterSpec.Builder(
++        val builder = KeyGenParameterSpec.Builder(
+             KEY_ALIAS,
+             KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+         )
+             .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
++            .setKeySize(256)
++            .setUserAuthenticationRequired(false)
+             .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+             .setRandomizedEncryptionRequired(true)
+-            .build()
++        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
++            builder.setUserAuthenticationParameters(30, KeyProperties.AUTH_BIOMETRIC_STRONG or KeyProperties.AUTH_DEVICE_CREDENTIAL)
++        }
++        val spec = builder.build()
+         keyGenerator.init(spec)
+         return keyGenerator.generateKey()
+     }
+--- /mnt/data/scanmate_before/SettingsRepository.kt	2026-05-30 14:59:47.273901435 +0000
++++ app/src/main/java/com/synthbyte/scanmate/data/SettingsRepository.kt	2026-05-30 15:03:40.177517798 +0000
+@@ -1,6 +1,7 @@
+ package com.synthbyte.scanmate.data
+ 
+ import android.content.Context
++import android.content.SharedPreferences
+ import androidx.datastore.core.DataStore
+ import androidx.datastore.preferences.core.Preferences
+ import androidx.datastore.preferences.core.edit
+@@ -9,6 +10,7 @@
+ import androidx.datastore.preferences.preferencesDataStore
+ import kotlinx.coroutines.flow.Flow
+ import kotlinx.coroutines.flow.map
++import kotlinx.coroutines.launch
+ import com.synthbyte.scanmate.domain.GeminiModels
+ 
+ val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
+@@ -23,8 +25,22 @@
+     }
+ }
+ 
++@Suppress("DEPRECATION")
+ class SettingsRepository(private val context: Context) {
+ 
++    private val securePrefs: SharedPreferences by lazy {
++        val masterKey = androidx.security.crypto.MasterKey.Builder(context)
++            .setKeyScheme(androidx.security.crypto.MasterKey.KeyScheme.AES256_GCM)
++            .build()
++        androidx.security.crypto.EncryptedSharedPreferences.create(
++            context,
++            "scanmate_secure_prefs",
++            masterKey,
++            androidx.security.crypto.EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
++            androidx.security.crypto.EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
++        )
++    }
++
+     companion object {
+         val GEMINI_API_KEY = stringPreferencesKey("gemini_api_key")
+         val GEMINI_MODEL_ID = stringPreferencesKey("gemini_model_id")
+@@ -33,8 +49,15 @@
+         val DEFAULT_WORKSPACE = stringPreferencesKey("default_workspace")
+     }
+ 
++    @OptIn(kotlinx.coroutines.DelicateCoroutinesApi::class)
+     val geminiApiKeyFlow: Flow<String?> = context.dataStore.data
+-        .map { preferences -> preferences[GEMINI_API_KEY] }
++        .map { preferences ->
++            securePrefs.getString("gemini_api_key_secure", null)
++                ?: preferences[GEMINI_API_KEY]?.also { legacy ->
++                    securePrefs.edit().putString("gemini_api_key_secure", legacy).apply()
++                    kotlinx.coroutines.GlobalScope.launch { context.dataStore.edit { it.remove(GEMINI_API_KEY) } }
++                }
++        }
+ 
+     val themeModeFlow: Flow<ThemeMode> = context.dataStore.data
+         .map { preferences -> ThemeMode.fromStorage(preferences[THEME_MODE]) }
+@@ -49,15 +72,13 @@
+         .map { preferences -> preferences[DEFAULT_WORKSPACE]?.takeIf { it.isNotBlank() } ?: "Inbox" }
+ 
+     suspend fun saveApiKey(apiKey: String) {
+-        context.dataStore.edit { preferences ->
+-            preferences[GEMINI_API_KEY] = apiKey
+-        }
++        securePrefs.edit().putString("gemini_api_key_secure", apiKey.trim()).apply()
++        context.dataStore.edit { it.remove(GEMINI_API_KEY) }
+     }
+ 
+     suspend fun clearApiKey() {
+-        context.dataStore.edit { preferences ->
+-            preferences.remove(GEMINI_API_KEY)
+-        }
++        securePrefs.edit().remove("gemini_api_key_secure").apply()
++        context.dataStore.edit { it.remove(GEMINI_API_KEY) }
+     }
+ 
+     suspend fun saveGeminiModel(modelId: String) {
+--- /mnt/data/scanmate_before/app_build.gradle.kts	2026-05-30 14:59:47.287575121 +0000
++++ app/build.gradle.kts	2026-05-30 15:01:27.302297953 +0000
+@@ -139,6 +139,7 @@
+     implementation(libs.zxing.core)
+     implementation(libs.hilt.android)
+     implementation(libs.androidx.biometric)
++    implementation(libs.androidx.security.crypto)
+ 
+     implementation("com.itextpdf:itextg:5.5.10")
+     implementation("com.madgag.spongycastle:core:1.58.0.0")
+--- /mnt/data/scanmate_before/libs.versions.toml	2026-05-30 14:59:47.302114254 +0000
++++ gradle/libs.versions.toml	2026-05-30 15:01:27.301765701 +0000
+@@ -29,6 +29,7 @@
+ hilt = "2.51.1"
+ hilt-navigation-compose = "1.2.0"
+ biometric = "1.2.0-alpha05"
++security-crypto = "1.1.0-alpha06"
+ 
+ [libraries]
+ androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
+@@ -78,6 +79,7 @@
+ hilt-compiler = { group = "com.google.dagger", name = "hilt-android-compiler", version.ref = "hilt" }
+ hilt-navigation-compose = { group = "androidx.hilt", name = "hilt-navigation-compose", version.ref = "hilt-navigation-compose" }
+ androidx-biometric = { group = "androidx.biometric", name = "biometric", version.ref = "biometric" }
++androidx-security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "security-crypto" }
+ 
+ [plugins]
+ android-application = { id = "com.android.application", version.ref = "agp" }
+--- /mnt/data/scanmate_before/backup_rules.xml	2026-05-30 14:59:47.333928294 +0000
++++ app/src/main/res/xml/backup_rules.xml	2026-05-30 15:01:27.304282733 +0000
+@@ -4,4 +4,8 @@
+     <exclude domain="file" path="vault/" />
+     <exclude domain="external" path="Vault/" />
+     <exclude domain="external" path="vault/" />
++        <exclude domain="database" path="scanmate_database" />
++        <exclude domain="database" path="scanmate_database-shm" />
++        <exclude domain="database" path="scanmate_database-wal" />
++        <exclude domain="file" path="datastore/" />
+ </full-backup-content>
+--- /mnt/data/scanmate_before/data_extraction_rules.xml	2026-05-30 14:59:47.316842489 +0000
++++ app/src/main/res/xml/data_extraction_rules.xml	2026-05-30 15:01:27.303355939 +0000
+@@ -5,11 +5,19 @@
+         <exclude domain="file" path="vault/" />
+         <exclude domain="external" path="Vault/" />
+         <exclude domain="external" path="vault/" />
++        <exclude domain="database" path="scanmate_database" />
++        <exclude domain="database" path="scanmate_database-shm" />
++        <exclude domain="database" path="scanmate_database-wal" />
++        <exclude domain="file" path="datastore/" />
+     </cloud-backup>
+     <device-transfer>
+         <exclude domain="file" path="Vault/" />
+         <exclude domain="file" path="vault/" />
+         <exclude domain="external" path="Vault/" />
+         <exclude domain="external" path="vault/" />
++        <exclude domain="database" path="scanmate_database" />
++        <exclude domain="database" path="scanmate_database-shm" />
++        <exclude domain="database" path="scanmate_database-wal" />
++        <exclude domain="file" path="datastore/" />
+     </device-transfer>
+ </data-extraction-rules>
+--- /mnt/data/scanmate_before/ToolsScreen.kt	2026-05-30 14:59:47.351600342 +0000
++++ app/src/main/java/com/synthbyte/scanmate/ui/screens/ToolsScreen.kt	2026-05-30 15:01:27.304943418 +0000
+@@ -130,11 +130,11 @@
+             title = "AI Tools",
+             subtitle = "Offline-first enhancement helpers. Online Gemini features remain optional and user-key controlled.",
+             actions = listOf(
+-                ToolAction("erase_marks", "Erase Marks", Icons.Default.AutoAwesome, ToolTone.ACCENT, enabled = true, stateLabel = "Filters", onClick = onNavigateToPdfTools),
++                ToolAction("erase_marks", "Erase Marks", Icons.Default.AutoAwesome, ToolTone.ACCENT, enabled = true, stateLabel = "Filters", onClick = onNavigateToCamera),
+                 ToolAction("enhance", "Enhance Documents", Icons.Default.AutoAwesome, ToolTone.ACCENT, enabled = false, stateLabel = "Coming soon"),
+                 ToolAction("auto_crop", "Auto Crop", Icons.Default.AutoAwesome, ToolTone.ACCENT, enabled = true, stateLabel = "Camera", onClick = onNavigateToPdfTools),
+-                ToolAction("auto_deskew", "Auto Deskew", Icons.Default.AutoAwesome, ToolTone.ACCENT, enabled = true, stateLabel = "Filters", onClick = onNavigateToPdfTools),
+-                ToolAction("shadow", "Shadow Removal", Icons.Default.AutoAwesome, ToolTone.ACCENT, enabled = true, stateLabel = "Filters", onClick = onNavigateToPdfTools),
++                ToolAction("auto_deskew", "Auto Deskew", Icons.Default.AutoAwesome, ToolTone.ACCENT, enabled = true, stateLabel = "Filters", onClick = onNavigateToCamera),
++                ToolAction("shadow", "Shadow Removal", Icons.Default.AutoAwesome, ToolTone.ACCENT, enabled = true, stateLabel = "Filters", onClick = onNavigateToCamera),
+                 ToolAction("contrast", "Contrast Boost", Icons.Default.AutoAwesome, ToolTone.ACCENT, enabled = true, stateLabel = "Filters", onClick = onNavigateToPdfTools),
+                 ToolAction("clean_bg", "Clean Background", Icons.Default.AutoAwesome, ToolTone.ACCENT, enabled = false, stateLabel = "Coming soon"),
+                 ToolAction("ocr_cleanup", "OCR Cleanup", Icons.Default.Translate, ToolTone.ACCENT, enabled = true, stateLabel = "Ready", onClick = onNavigateToTranslate),
+--- /mnt/data/scanmate_before/VaultScreen.kt	2026-05-30 14:59:47.367531268 +0000
++++ app/src/main/java/com/synthbyte/scanmate/ui/screens/VaultScreen.kt	2026-05-30 15:01:27.305504926 +0000
+@@ -68,6 +68,7 @@
+ fun VaultScreen(onNavigateBack: () -> Unit) {
+     val context = LocalContext.current
+     var vaultUnlocked by remember { mutableStateOf(false) }
++    var authError by remember { mutableStateOf<String?>(null) }
+     val biometricManager = BiometricManager.from(context)
+     val canAuth = biometricManager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL)
+     if (!vaultUnlocked) {
+@@ -78,7 +79,9 @@
+                     ContextCompat.getMainExecutor(context),
+                     object : BiometricPrompt.AuthenticationCallback() {
+                         override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) { vaultUnlocked = true }
+-                        override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {}
++                        override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
++                            authError = errString.toString()
++                        }
+                     }
+                 )
+                 prompt.authenticate(
+@@ -97,6 +100,24 @@
+                 Icon(Icons.Default.Fingerprint, null, Modifier.size(64.dp), tint = MaterialTheme.colorScheme.primary)
+                 Text("Vault Locked", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold)
+                 Text("Authenticate to access your encrypted documents.", style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
++                authError?.let { err ->
++                    Spacer(Modifier.height(16.dp))
++                    Text(err, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
++                    Spacer(Modifier.height(8.dp))
++                    OutlinedButton(onClick = {
++                        authError = null
++                        val prompt = BiometricPrompt(context as FragmentActivity, ContextCompat.getMainExecutor(context),
++                            object : BiometricPrompt.AuthenticationCallback() {
++                                override fun onAuthenticationSucceeded(r: BiometricPrompt.AuthenticationResult) { vaultUnlocked = true }
++                                override fun onAuthenticationError(code: Int, msg: CharSequence) { authError = msg.toString() }
++                            })
++                        prompt.authenticate(BiometricPrompt.PromptInfo.Builder()
++                            .setTitle("Unlock Vault")
++                            .setSubtitle("Authenticate to access encrypted documents")
++                            .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL)
++                            .build())
++                    }) { Text("Try again") }
++                }
+             }
+         }
+         return
+--- /dev/null	2026-05-30 14:58:17.395175102 +0000
++++ app/src/main/res/xml/network_security_config.xml	2026-05-30 15:01:27.297871556 +0000
+@@ -0,0 +1,8 @@
++<?xml version="1.0" encoding="utf-8"?>
++<network-security-config>
++    <base-config cleartextTrafficPermitted="false">
++        <trust-anchors>
++            <certificates src="system" />
++        </trust-anchors>
++    </base-config>
++</network-security-config>

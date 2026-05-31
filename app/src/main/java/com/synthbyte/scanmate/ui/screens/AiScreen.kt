@@ -295,8 +295,20 @@ fun AiScreen(onNavigateBack: () -> Unit, settingsRepository: SettingsRepository)
                         },
                         onSaveVCard = {
                             coroutineScope.launch {
-                                val file = FileCore.saveTextFile(context, buildVCard(card), "contact_${System.currentTimeMillis()}.vcf")
-                                Toast.makeText(context, if (file != null) "vCard saved" else "vCard save failed", Toast.LENGTH_SHORT).show()
+                                val saved = FileCore.saveTextFile(context, buildVCard(card), "contact_${System.currentTimeMillis()}.vcf")
+                                if (saved != null) {
+                                    val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", saved)
+                                    context.startActivity(android.content.Intent.createChooser(
+                                        android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                            type = "text/x-vcard"
+                                            putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                                            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                        },
+                                        "Save contact to…"
+                                    ))
+                                } else {
+                                    Toast.makeText(context, "Failed to save contact", Toast.LENGTH_SHORT).show()
+                                }
                             }
                         }
                     )

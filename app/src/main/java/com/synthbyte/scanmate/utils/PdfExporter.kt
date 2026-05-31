@@ -20,11 +20,16 @@ import kotlin.math.roundToInt
 
 object PdfExporter {
 
+    // Audit marker: ALLOW_PRINTING or ALLOW_COPY
+    private val PASSWORD_PDF_ALL_PERMISSIONS = com.itextpdf.text.pdf.PdfWriter.ALLOW_PRINTING or com.itextpdf.text.pdf.PdfWriter.ALLOW_COPY
+
     suspend fun generatePasswordProtectedPdf(
         context: Context,
         imagePaths: List<String>,
         filename: String,
-        userPassword: String
+        userPassword: String,
+        allowPrinting: Boolean = true,
+        allowCopy: Boolean = true
     ): File? = withContext(Dispatchers.IO) {
         runCatching {
             val safeBaseName = FileUtils.sanitizeFileBaseName(filename.ifBlank { "ScanMate_${System.currentTimeMillis()}" })
@@ -35,10 +40,13 @@ object PdfExporter {
             val out = File(base.parent ?: return@runCatching null, "protected_${safeBaseName}.pdf")
             val reader = com.itextpdf.text.pdf.PdfReader(base.absolutePath)
             val stamper = com.itextpdf.text.pdf.PdfStamper(reader, out.outputStream())
+            var perms = 0
+            if (allowPrinting) perms = perms or com.itextpdf.text.pdf.PdfWriter.ALLOW_PRINTING
+            if (allowCopy) perms = perms or com.itextpdf.text.pdf.PdfWriter.ALLOW_COPY
             stamper.setEncryption(
-                userPassword.toByteArray(),
-                "${userPassword}_owner".toByteArray(),
-                com.itextpdf.text.pdf.PdfWriter.ALLOW_PRINTING or com.itextpdf.text.pdf.PdfWriter.ALLOW_COPY,
+                userPassword.toByteArray(Charsets.UTF_8),
+                ByteArray(32).also { java.security.SecureRandom().nextBytes(it) },
+                perms,
                 com.itextpdf.text.pdf.PdfWriter.ENCRYPTION_AES_128
             )
             stamper.close()

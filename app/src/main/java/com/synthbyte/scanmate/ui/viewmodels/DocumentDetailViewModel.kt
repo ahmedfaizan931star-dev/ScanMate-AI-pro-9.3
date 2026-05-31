@@ -135,7 +135,7 @@ class DocumentDetailViewModel @Inject constructor(
     }
 
 
-    fun exportProtectedPdf(dwp: DocumentWithPages?, password: String, filename: String) = viewModelScope.launch {
+    fun exportProtectedPdf(dwp: DocumentWithPages?, password: String, filename: String, allowPrinting: Boolean = true, allowCopy: Boolean = true) = viewModelScope.launch {
         if (dwp == null || dwp.pages.isEmpty()) {
             publishErrorMessage("No pages to export")
             return@launch
@@ -143,7 +143,7 @@ class DocumentDetailViewModel @Inject constructor(
         _exportState.value = ExportState.Loading("Encrypting PDF…")
         runCatching {
             val paths = dwp.pages.sortedBy { it.pageOrder }.map { it.imagePath }
-            val file = FileUtils.generatePasswordProtectedPdf(context, paths, filename, password)
+            val file = FileUtils.generatePasswordProtectedPdf(context, paths, filename, password, allowPrinting, allowCopy)
             _exportState.value = if (file != null) ExportState.PdfSuccess(file) else ExportState.Error("PDF encryption failed")
         }.onFailure { throwable -> publishError(throwable) }
     }

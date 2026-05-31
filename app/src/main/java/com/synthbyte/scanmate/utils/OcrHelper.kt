@@ -178,7 +178,8 @@ object OcrHelper {
         if (cur.isNotBlank()) paras.add(cur)
         return paras.joinToString("\n\n") { paragraph ->
             var t = paragraph.toString().trim()
-            if (t.isNotEmpty() && t.last().isLetter()) t += "."
+            val lastChar = t.lastOrNull()
+            if (lastChar != null && lastChar.isLetter() && !t.trimEnd().endsWith(".") && !t.trimEnd().endsWith(",") && t.length > 3) t += "."
             t.replace(Regex(" {2,}"), " ").replace(Regex("([a-z])([A-Z])"), "$1 $2")
         }
     }

@@ -1,6 +1,7 @@
 package com.synthbyte.scanmate.data
 
 import android.content.Context
+import android.content.SharedPreferences
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
@@ -9,6 +10,10 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 import com.synthbyte.scanmate.domain.GeminiModels
 
 val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
@@ -23,7 +28,23 @@ enum class ThemeMode(val storageValue: String, val label: String, val descriptio
     }
 }
 
+@Suppress("DEPRECATION")
 class SettingsRepository(private val context: Context) {
+
+    private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    private val securePrefs: SharedPreferences by lazy {
+        val masterKey = androidx.security.crypto.MasterKey.Builder(context)
+            .setKeyScheme(androidx.security.crypto.MasterKey.KeyScheme.AES256_GCM)
+            .build()
+        androidx.security.crypto.EncryptedSharedPreferences.create(
+            context,
+            "scanmate_secure_prefs",
+            masterKey,
+            androidx.security.crypto.EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            androidx.security.crypto.EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+        )
+    }
 
     companion object {
         val GEMINI_API_KEY = stringPreferencesKey("gemini_api_key")
@@ -34,7 +55,13 @@ class SettingsRepository(private val context: Context) {
     }
 
     val geminiApiKeyFlow: Flow<String?> = context.dataStore.data
-        .map { preferences -> preferences[GEMINI_API_KEY] }
+        .map { preferences ->
+            securePrefs.getString("gemini_api_key_secure", null)
+                ?: preferences[GEMINI_API_KEY]?.also { legacy ->
+                    securePrefs.edit().putString("gemini_api_key_secure", legacy).apply()
+                    repositoryScope.launch { context.dataStore.edit { it.remove(GEMINI_API_KEY) } }
+                }
+        }
 
     val themeModeFlow: Flow<ThemeMode> = context.dataStore.data
         .map { preferences -> ThemeMode.fromStorage(preferences[THEME_MODE]) }
@@ -49,15 +76,13 @@ class SettingsRepository(private val context: Context) {
         .map { preferences -> preferences[DEFAULT_WORKSPACE]?.takeIf { it.isNotBlank() } ?: "Inbox" }
 
     suspend fun saveApiKey(apiKey: String) {
-        context.dataStore.edit { preferences ->
-            preferences[GEMINI_API_KEY] = apiKey
-        }
+        securePrefs.edit().putString("gemini_api_key_secure", apiKey.trim()).apply()
+        context.dataStore.edit { it.remove(GEMINI_API_KEY) }
     }
 
     suspend fun clearApiKey() {
-        context.dataStore.edit { preferences ->
-            preferences.remove(GEMINI_API_KEY)
-        }
+        securePrefs.edit().remove("gemini_api_key_secure").apply()
+        context.dataStore.edit { it.remove(GEMINI_API_KEY) }
     }
 
     suspend fun saveGeminiModel(modelId: String) {

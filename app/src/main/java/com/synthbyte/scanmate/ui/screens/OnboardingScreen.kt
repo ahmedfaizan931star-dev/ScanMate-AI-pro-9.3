@@ -79,7 +79,7 @@ fun OnboardingScreen(
             title = "Secure local vault",
             subtitle = "Store sensitive OCR snippets in an encrypted local vault powered by Android Keystore.",
             icon = Icons.Default.Lock,
-            bullets = listOf("Local encryption", "No account. No cloud. No subscription. Ever.", "No account required", "Export only when you decide")
+            bullets = listOf("Local encryption", "No account. No cloud. No subscription. Ever.", "Private by default", "Export only when you decide")
         ),
         OnboardingPage(
             title = "PDF, QR and exports",

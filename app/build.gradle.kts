@@ -139,6 +139,7 @@ dependencies {
     implementation(libs.zxing.core)
     implementation(libs.hilt.android)
     implementation(libs.androidx.biometric)
+    implementation(libs.androidx.security.crypto)
 
     implementation("com.itextpdf:itextg:5.5.10")
     implementation("com.madgag.spongycastle:core:1.58.0.0")

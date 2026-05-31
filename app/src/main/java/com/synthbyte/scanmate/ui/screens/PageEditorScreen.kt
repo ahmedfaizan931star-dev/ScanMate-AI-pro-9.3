@@ -32,6 +32,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.TextSnippet
+import androidx.compose.material.icons.filled.WbSunny
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.RotateLeft
 import androidx.compose.material.icons.filled.RotateRight
 import androidx.compose.material.icons.filled.ContentCopy
@@ -103,6 +105,7 @@ fun PageEditorScreen(docId: Long, pageId: Long, onNavigateBack: () -> Unit) {
     val page by viewModel.page.collectAsState(initial = null)
     val workingBitmap by viewModel.workingBitmap.collectAsState()
     val pageEditorError by viewModel.errorState.collectAsState()
+    val viewModelProcessing by viewModel.isProcessing.collectAsState()
     val scope = rememberCoroutineScope()
     val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
 
@@ -116,6 +119,7 @@ fun PageEditorScreen(docId: Long, pageId: Long, onNavigateBack: () -> Unit) {
     var watermarkText by remember { mutableStateOf("ScanMate AI Pro") }
     var noteText by remember { mutableStateOf("Reviewed") }
     var isProcessing by remember { mutableStateOf(false) }
+    val isEditorProcessing = isProcessing || viewModelProcessing
     var changeVersion by remember { mutableIntStateOf(0) }
     val undoStack = remember { mutableStateListOf<android.graphics.Bitmap>() }
     val redoStack = remember { mutableStateListOf<android.graphics.Bitmap>() }
@@ -366,6 +370,45 @@ fun PageEditorScreen(docId: Long, pageId: Long, onNavigateBack: () -> Unit) {
                         },
                         label = { Text(filter.label) }
                     )
+                }
+                item(key = "erase_marks_chip") {
+                    FilterChip(
+                        selected = false,
+                        enabled = !isEditorProcessing,
+                        onClick = {
+                            pushUndoSnapshot()
+                            viewModel.removeMarks()
+                        },
+                        label = { Text("Erase Marks") },
+                        leadingIcon = { Icon(Icons.Default.AutoAwesome, null, Modifier.size(16.dp)) }
+                    )
+                }
+                item(key = "remove_shadow_chip") {
+                    FilterChip(
+                        selected = false,
+                        enabled = !isEditorProcessing,
+                        onClick = {
+                            pushUndoSnapshot()
+                            viewModel.removeShadow()
+                        },
+                        label = { Text("Remove Shadow") },
+                        leadingIcon = { Icon(Icons.Default.WbSunny, null, Modifier.size(16.dp)) }
+                    )
+                }
+                item(key = "deskew_chip") {
+                    FilterChip(
+                        selected = false,
+                        enabled = !isEditorProcessing,
+                        onClick = {
+                            pushUndoSnapshot()
+                            viewModel.deskew()
+                        },
+                        label = { Text("Deskew") },
+                        leadingIcon = { Icon(Icons.Default.RotateRight, null, Modifier.size(16.dp)) }
+                    )
+                }
+                item(key = "editor_tools_processing") {
+                    if (isEditorProcessing) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                 }
             }
 

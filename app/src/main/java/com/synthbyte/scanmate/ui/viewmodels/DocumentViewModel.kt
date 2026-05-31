@@ -20,6 +20,7 @@ import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -40,13 +41,22 @@ class DocumentViewModel @Inject constructor(
     val qrHistory: Flow<List<QrHistory>> = dao.getQrHistory()
 
     val searchQuery = MutableStateFlow("")
+    private val _searchHistory = MutableStateFlow<List<String>>(emptyList())
+    val searchHistory: StateFlow<List<String>> = _searchHistory.asStateFlow()
+
     val searchResults: StateFlow<List<Document>> = searchQuery
-        .debounce(300L)
+        .debounce(150L)
         .flatMapLatest { q -> if (q.isBlank()) flowOf(emptyList()) else dao.searchDocuments(q) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     fun setSearchQuery(q: String) {
         searchQuery.value = q
+    }
+
+    fun addToSearchHistory(query: String) {
+        if (query.isBlank() || query.length < 2) return
+        val updated = (_searchHistory.value - query + query).takeLast(5)
+        _searchHistory.value = updated
     }
 
 

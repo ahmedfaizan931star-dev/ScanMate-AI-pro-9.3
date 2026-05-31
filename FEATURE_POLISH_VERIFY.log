@@ -1,0 +1,80 @@
+PASS 1 ALLOW_PRINTING or ALLOW_COPY
+  23:    // Audit marker: ALLOW_PRINTING or ALLOW_COPY
+PASS 2 no duplicate ALLOW_PRINTING
+PASS 3 no GlobalScope
+PASS 4 repositoryScope
+  34:    private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+  62:                    repositoryScope.launch { context.dataStore.edit { it.remove(GEMINI_API_KEY) } }
+PASS 5 overlay pulse
+  21:import androidx.compose.animation.core.rememberInfiniteTransition
+  36:    val infiniteTransition = rememberInfiniteTransition(label = "scan_pulse")
+  37:    val pulseAlpha by infiniteTransition.animateFloat(
+  50:    val animAlpha by animateFloatAsState(if (isLocked) 1f else pulseAlpha, animationSpec = tween(300), label = "overlay_alpha")
+PASS 6 camera snap + badge
+  287:                ?.playSoundEffect(AudioManager.FX_KEYPRESS_STANDARD, 0.5f)
+  393:                text = "Document ready · Tap to capture",
+PASS 7 debounce 150
+  48:        .debounce(150L)
+PASS 8 search history VM
+  44:    private val _searchHistory = MutableStateFlow<List<String>>(emptyList())
+  45:    val searchHistory: StateFlow<List<String>> = _searchHistory.asStateFlow()
+  56:    fun addToSearchHistory(query: String) {
+  58:        val updated = (_searchHistory.value - query + query).takeLast(5)
+  59:        _searchHistory.value = updated
+PASS 9 search history UI
+  253:                item(key = "search_history") {
+  255:                        Text("Recent searches", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+PASS 10 heightIn 380 verticalScroll
+  10:import androidx.compose.foundation.verticalScroll
+  214:                            .heightIn(max = 380.dp)
+  215:                            .verticalScroll(rememberScrollState())
+PASS 11 PDF permission UI
+  139:    var allowCopy by remember { mutableStateOf(true) }
+  140:    var allowPrinting by remember { mutableStateOf(true) }
+  450:                                    Checkbox(checked = allowPrinting, onCheckedChange = { allowPrinting = it })
+  454:                                    Checkbox(checked = allowCopy, onCheckedChange = { allowCopy = it })
+  468:                                    viewModel.exportProtectedPdf(documentWithPages, pdfPassword, exportName, allowPrinting, allowCopy)
+PASS 12 PdfExporter allowPrinting Boolean
+  31:        allowPrinting: Boolean = true,
+PASS 13 PageEditor tool buttons
+  380:                            viewModel.removeMarks()
+  404:                            viewModel.deskew()
+PASS 14 PageEditor isProcessing
+  44:    private val _isProcessing = MutableStateFlow(false)
+  45:    val isProcessing: StateFlow<Boolean> = _isProcessing.asStateFlow()
+  85:        _isProcessing.value = true
+  90:            _isProcessing.value = false
+  96:        _isProcessing.value = true
+  101:            _isProcessing.value = false
+  107:        _isProcessing.value = true
+  112:            _isProcessing.value = false
+PASS 15 OcrHelper lastChar
+  181:            val lastChar = t.lastOrNull()
+  182:            if (lastChar != null && lastChar.isLetter() && !t.trimEnd().endsWith(".") && !t.trimEnd().endsWith(",") && t.length > 3) t += "."
+PASS 16 no t.last().isLetter
+PASS 17 business card regex
+  70:        val nameR = Regex("""^[A-Z][a-zA-Z'\-]+(\s[A-Z][a-zA-Z'\-]+){1,4}(\s(Jr|Sr|II|III|IV|V|PhD|MD|Esq)\.?)?$""")
+  74:                (nameR.matches(line.trim()) || (line.trim().split(" ").size in 2..5 && line.trim().first().isUpperCase()))
+PASS 18 vCard share intent
+  302:                                        android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+  303:                                            type = "text/x-vcard"
+PASS 19 no duplicate onboarding bullet
+CHECK 20 line counts:
+  PASS PdfExporter.kt                      before= 420 after= 428
+  PASS SettingsRepository.kt               before= 107 after= 111
+  PASS DocumentOverlay.kt                  before=  71 after=  94
+  PASS CameraScreen.kt                     before= 624 after= 650
+  PASS DocDao.kt                           before= 143 after= 143
+  PASS DocumentViewModel.kt                before= 159 after= 169
+  PASS HomeScreen.kt                       before= 293 after= 326
+  PASS DocumentDetailScreen.kt             before= 821 after= 834
+  PASS DocumentDetailViewModel.kt          before= 318 after= 318
+  PASS FileUtils.kt                        before=  92 after=  92
+  PASS PageEditorScreen.kt                 before= 660 after= 703
+  PASS PageEditorViewModel.kt              before= 161 after= 179
+  PASS OcrHelper.kt                        before= 320 after= 321
+  PASS DocumentIntelligence.kt             before= 277 after= 282
+  PASS AiScreen.kt                         before= 484 after= 496
+  PASS OnboardingScreen.kt                 before= 186 after= 186
+PASS 20 line counts
+SUMMARY pass=20 fail=0

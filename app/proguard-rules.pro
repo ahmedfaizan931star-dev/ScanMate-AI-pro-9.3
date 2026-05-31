@@ -42,3 +42,12 @@
 -dontwarn org.spongycastle.**
 -keep class org.spongycastle.** { *; }
 -keep class com.itextpdf.** { *; }
+
+# Security/runtime keep rules for password-protected PDF export and encrypted preferences.
+-dontwarn com.itextpdf.**
+-keep class org.bouncycastle.** { *; }
+-dontwarn org.bouncycastle.**
+-keep class androidx.security.crypto.** { *; }
+-dontwarn androidx.security.crypto.**
+-keep class com.google.crypto.tink.** { *; }
+-dontwarn com.google.crypto.tink.**

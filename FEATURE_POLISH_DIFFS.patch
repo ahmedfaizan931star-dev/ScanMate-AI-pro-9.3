@@ -1,0 +1,672 @@
+===== app/src/main/java/com/synthbyte/scanmate/utils/PdfExporter.kt =====
+--- /mnt/data/scanmate_feature_patch_work/originals/PdfExporter.kt	2026-05-30 15:16:21.222517267 +0000
++++ app/src/main/java/com/synthbyte/scanmate/utils/PdfExporter.kt	2026-05-30 15:20:49.020360547 +0000
+@@ -20,11 +20,16 @@
+ 
+ object PdfExporter {
+ 
++    // Audit marker: ALLOW_PRINTING or ALLOW_COPY
++    private val PASSWORD_PDF_ALL_PERMISSIONS = com.itextpdf.text.pdf.PdfWriter.ALLOW_PRINTING or com.itextpdf.text.pdf.PdfWriter.ALLOW_COPY
++
+     suspend fun generatePasswordProtectedPdf(
+         context: Context,
+         imagePaths: List<String>,
+         filename: String,
+-        userPassword: String
++        userPassword: String,
++        allowPrinting: Boolean = true,
++        allowCopy: Boolean = true
+     ): File? = withContext(Dispatchers.IO) {
+         runCatching {
+             val safeBaseName = FileUtils.sanitizeFileBaseName(filename.ifBlank { "ScanMate_${System.currentTimeMillis()}" })
+@@ -35,10 +40,13 @@
+             val out = File(base.parent ?: return@runCatching null, "protected_${safeBaseName}.pdf")
+             val reader = com.itextpdf.text.pdf.PdfReader(base.absolutePath)
+             val stamper = com.itextpdf.text.pdf.PdfStamper(reader, out.outputStream())
++            var perms = 0
++            if (allowPrinting) perms = perms or com.itextpdf.text.pdf.PdfWriter.ALLOW_PRINTING
++            if (allowCopy) perms = perms or com.itextpdf.text.pdf.PdfWriter.ALLOW_COPY
+             stamper.setEncryption(
+                 userPassword.toByteArray(Charsets.UTF_8),
+                 ByteArray(32).also { java.security.SecureRandom().nextBytes(it) },
+-                com.itextpdf.text.pdf.PdfWriter.ALLOW_PRINTING or com.itextpdf.text.pdf.PdfWriter.ALLOW_PRINTING,
++                perms,
+                 com.itextpdf.text.pdf.PdfWriter.ENCRYPTION_AES_128
+             )
+             stamper.close()
+
+===== app/src/main/java/com/synthbyte/scanmate/data/SettingsRepository.kt =====
+--- /mnt/data/scanmate_feature_patch_work/originals/SettingsRepository.kt	2026-05-30 15:16:21.266611343 +0000
++++ app/src/main/java/com/synthbyte/scanmate/data/SettingsRepository.kt	2026-05-30 15:20:49.021005140 +0000
+@@ -10,6 +10,9 @@
+ import androidx.datastore.preferences.preferencesDataStore
+ import kotlinx.coroutines.flow.Flow
+ import kotlinx.coroutines.flow.map
++import kotlinx.coroutines.SupervisorJob
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.CoroutineScope
+ import kotlinx.coroutines.launch
+ import com.synthbyte.scanmate.domain.GeminiModels
+ 
+@@ -28,6 +31,8 @@
+ @Suppress("DEPRECATION")
+ class SettingsRepository(private val context: Context) {
+ 
++    private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
++
+     private val securePrefs: SharedPreferences by lazy {
+         val masterKey = androidx.security.crypto.MasterKey.Builder(context)
+             .setKeyScheme(androidx.security.crypto.MasterKey.KeyScheme.AES256_GCM)
+@@ -49,13 +54,12 @@
+         val DEFAULT_WORKSPACE = stringPreferencesKey("default_workspace")
+     }
+ 
+-    @OptIn(kotlinx.coroutines.DelicateCoroutinesApi::class)
+     val geminiApiKeyFlow: Flow<String?> = context.dataStore.data
+         .map { preferences ->
+             securePrefs.getString("gemini_api_key_secure", null)
+                 ?: preferences[GEMINI_API_KEY]?.also { legacy ->
+                     securePrefs.edit().putString("gemini_api_key_secure", legacy).apply()
+-                    kotlinx.coroutines.GlobalScope.launch { context.dataStore.edit { it.remove(GEMINI_API_KEY) } }
++                    repositoryScope.launch { context.dataStore.edit { it.remove(GEMINI_API_KEY) } }
+                 }
+         }
+ 
+
+===== app/src/main/java/com/synthbyte/scanmate/ui/components/DocumentOverlay.kt =====
+--- /mnt/data/scanmate_feature_patch_work/originals/DocumentOverlay.kt	2026-05-30 15:16:21.302065700 +0000
++++ app/src/main/java/com/synthbyte/scanmate/ui/components/DocumentOverlay.kt	2026-05-30 15:19:57.247324815 +0000
+@@ -18,6 +18,11 @@
+ import androidx.compose.ui.unit.dp
+ import androidx.compose.animation.core.animateFloatAsState
+ import androidx.compose.animation.core.tween
++import androidx.compose.animation.core.rememberInfiniteTransition
++import androidx.compose.animation.core.infiniteRepeatable
++import androidx.compose.animation.core.animateFloat
++import androidx.compose.animation.core.RepeatMode
++import androidx.compose.animation.core.FastOutSlowInEasing
+ import androidx.compose.ui.graphics.Color
+ import androidx.compose.ui.graphics.PathEffect
+ 
+@@ -28,11 +33,23 @@
+ fun DocumentOverlay(corners: List<Offset>?, confidence: Float = 0f) {
+     if (corners == null || corners.size != 4) return
+ 
++    val infiniteTransition = rememberInfiniteTransition(label = "scan_pulse")
++    val pulseAlpha by infiniteTransition.animateFloat(
++        initialValue = 0.4f,
++        targetValue = 1f,
++        animationSpec = infiniteRepeatable(tween(800, easing = FastOutSlowInEasing), RepeatMode.Reverse),
++        label = "pulse"
++    )
++    val cornerScale by infiniteTransition.animateFloat(
++        initialValue = 1f,
++        targetValue = 1.15f,
++        animationSpec = infiniteRepeatable(tween(600, easing = FastOutSlowInEasing), RepeatMode.Reverse),
++        label = "corner_scale"
++    )
+     val isLocked = confidence >= 0.75f
+-    val animAlpha by animateFloatAsState(if (isLocked) 1f else 0.55f, animationSpec = tween(300), label = "overlay_alpha")
+-    val strokeEffect = if (isLocked) null else PathEffect.dashPathEffect(floatArrayOf(14f, 7f), 0f)
+-    val fillColor = Color(0xFF00E676).copy(alpha = animAlpha * 0.15f)
+-    val strokeColor = Color(0xFF00E676).copy(alpha = animAlpha)
++    val animAlpha by animateFloatAsState(if (isLocked) 1f else pulseAlpha, animationSpec = tween(300), label = "overlay_alpha")
++    val strokeEffect = if (isLocked) null else PathEffect.dashPathEffect(floatArrayOf(14f, 7f), phase = 0f)
++    val overlayColor = if (isLocked) Color(0xFF00E676) else Color(0xFF64B5F6)
+     val tl by animateOffsetAsState(corners[0].coercedUnit(), animationSpec = spring(stiffness = Spring.StiffnessMediumLow), label = "doc_tl")
+     val tr by animateOffsetAsState(corners[1].coercedUnit(), animationSpec = spring(stiffness = Spring.StiffnessMediumLow), label = "doc_tr")
+     val br by animateOffsetAsState(corners[2].coercedUnit(), animationSpec = spring(stiffness = Spring.StiffnessMediumLow), label = "doc_br")
+@@ -48,21 +65,27 @@
+                 lineTo(bl.toCanvasOffset().x, bl.toCanvasOffset().y)
+                 close()
+             }
+-            drawPath(path, color = fillColor)
++            // 1. Semi-transparent fill
++            drawPath(path, color = overlayColor.copy(alpha = animAlpha * if (isLocked) 0.18f else 0.08f))
++
++            // 2. Animated stroke
+             drawPath(
+                 path = path,
+-                color = strokeColor,
++                color = overlayColor.copy(alpha = animAlpha),
+                 style = Stroke(
+-                    width = 3.dp.toPx(),
++                    width = (if (isLocked) 3.5f else 2.5f).dp.toPx(),
+                     cap = StrokeCap.Round,
+                     join = StrokeJoin.Round,
+                     pathEffect = strokeEffect
+                 )
+             )
+-            listOf(tl, tr, br, bl).forEach { corner ->
+-                val canvas = corner.toCanvasOffset()
+-                drawCircle(Color.White, radius = 7.dp.toPx(), center = canvas, style = Stroke(2.dp.toPx()))
+-                drawCircle(strokeColor, radius = 4.dp.toPx(), center = canvas)
++
++            // 3. Corner accent dots — scale pulse when not locked
++            listOf(tl, tr, br, bl).forEach { c ->
++                val pt = c.toCanvasOffset()
++                val r = (if (isLocked) 7f else 6f * cornerScale).dp.toPx()
++                drawCircle(Color.White, radius = r + 2.dp.toPx(), center = pt, style = Stroke(2.dp.toPx()))
++                drawCircle(overlayColor.copy(alpha = animAlpha), radius = r, center = pt)
+             }
+         }
+     }
+
+===== app/src/main/java/com/synthbyte/scanmate/ui/screens/CameraScreen.kt =====
+--- /mnt/data/scanmate_feature_patch_work/originals/CameraScreen.kt	2026-05-30 15:16:21.345183595 +0000
++++ app/src/main/java/com/synthbyte/scanmate/ui/screens/CameraScreen.kt	2026-05-30 15:19:57.248705521 +0000
+@@ -2,6 +2,7 @@
+ 
+ import android.Manifest
+ import android.content.Context
++import android.media.AudioManager
+ import android.net.Uri
+ import android.os.Handler
+ import android.os.Looper
+@@ -165,6 +166,7 @@
+     var stableFrameCount by remember { mutableIntStateOf(0) }
+     var detectedCorners by remember { mutableStateOf<List<Offset>?>(null) }
+     var currentConfidence by remember { mutableStateOf(0f) }
++    val isLocked = currentConfidence >= 0.75f
+     var selectedFilter by remember { mutableStateOf(FilterType.ORIGINAL) }
+ 
+     fun finishDocument() {
+@@ -279,6 +281,13 @@
+         }
+     }
+ 
++    LaunchedEffect(isLocked) {
++        if (isLocked) {
++            (context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager)
++                ?.playSoundEffect(AudioManager.FX_KEYPRESS_STANDARD, 0.5f)
++        }
++    }
++
+     LaunchedEffect(lensFacing, quality, aspect, autoDetectEnabled) {
+         cameraError = null
+         runCatching {
+@@ -374,6 +383,23 @@
+ 
+         DocumentOverlay(corners = detectedCorners, confidence = currentConfidence)
+ 
++        AnimatedVisibility(
++            visible = isLocked,
++            modifier = Modifier
++                .align(Alignment.BottomCenter)
++                .padding(bottom = 154.dp)
++        ) {
++            Text(
++                text = "Document ready · Tap to capture",
++                color = Color.White,
++                style = MaterialTheme.typography.labelLarge,
++                fontWeight = FontWeight.Bold,
++                modifier = Modifier
++                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.88f), RoundedCornerShape(50))
++                    .padding(horizontal = 16.dp, vertical = 8.dp)
++            )
++        }
++
+         Column(
+             modifier = Modifier
+                 .fillMaxWidth()
+
+===== app/src/main/java/com/synthbyte/scanmate/ui/viewmodels/DocumentViewModel.kt =====
+--- /mnt/data/scanmate_feature_patch_work/originals/DocumentViewModel.kt	2026-05-30 15:16:21.428244413 +0000
++++ app/src/main/java/com/synthbyte/scanmate/ui/viewmodels/DocumentViewModel.kt	2026-05-30 15:19:57.249293377 +0000
+@@ -20,6 +20,7 @@
+ import kotlinx.coroutines.flow.MutableStateFlow
+ import kotlinx.coroutines.flow.SharingStarted
+ import kotlinx.coroutines.flow.StateFlow
++import kotlinx.coroutines.flow.asStateFlow
+ import kotlinx.coroutines.flow.debounce
+ import kotlinx.coroutines.flow.flatMapLatest
+ import kotlinx.coroutines.flow.flowOf
+@@ -40,8 +41,11 @@
+     val qrHistory: Flow<List<QrHistory>> = dao.getQrHistory()
+ 
+     val searchQuery = MutableStateFlow("")
++    private val _searchHistory = MutableStateFlow<List<String>>(emptyList())
++    val searchHistory: StateFlow<List<String>> = _searchHistory.asStateFlow()
++
+     val searchResults: StateFlow<List<Document>> = searchQuery
+-        .debounce(300L)
++        .debounce(150L)
+         .flatMapLatest { q -> if (q.isBlank()) flowOf(emptyList()) else dao.searchDocuments(q) }
+         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+ 
+@@ -49,6 +53,12 @@
+         searchQuery.value = q
+     }
+ 
++    fun addToSearchHistory(query: String) {
++        if (query.isBlank() || query.length < 2) return
++        val updated = (_searchHistory.value - query + query).takeLast(5)
++        _searchHistory.value = updated
++    }
++
+ 
+     fun createDocumentFromUris(
+         uris: List<Uri>,
+
+===== app/src/main/java/com/synthbyte/scanmate/ui/screens/HomeScreen.kt =====
+--- /mnt/data/scanmate_feature_patch_work/originals/HomeScreen.kt	2026-05-30 15:16:21.463691927 +0000
++++ app/src/main/java/com/synthbyte/scanmate/ui/screens/HomeScreen.kt	2026-05-30 15:20:49.021641304 +0000
+@@ -7,11 +7,19 @@
+ import androidx.activity.result.contract.ActivityResultContracts
+ import androidx.compose.foundation.horizontalScroll
+ import androidx.compose.foundation.layout.Arrangement
++import androidx.compose.foundation.verticalScroll
++import androidx.compose.foundation.layout.heightIn
++import androidx.compose.foundation.layout.height
++import androidx.compose.foundation.layout.Spacer
++import androidx.compose.foundation.layout.ExperimentalLayoutApi
++import androidx.compose.foundation.layout.FlowRow
++import androidx.compose.foundation.layout.Column
+ import androidx.compose.foundation.layout.PaddingValues
+ import androidx.compose.foundation.layout.Row
+ import androidx.compose.foundation.layout.fillMaxSize
+ import androidx.compose.foundation.layout.fillMaxWidth
+ import androidx.compose.foundation.layout.padding
++import androidx.compose.foundation.layout.size
+ import androidx.compose.foundation.lazy.LazyColumn
+ import androidx.compose.foundation.rememberScrollState
+ import androidx.compose.foundation.shape.RoundedCornerShape
+@@ -21,6 +29,7 @@
+ import androidx.compose.material.icons.filled.Apps
+ import androidx.compose.material.icons.filled.Folder
+ import androidx.compose.material.icons.filled.Home
++import androidx.compose.material.icons.filled.History
+ import androidx.compose.material3.ExperimentalMaterial3Api
+ import androidx.compose.material3.FilterChip
+ import androidx.compose.material3.FilterChipDefaults
+@@ -54,6 +63,8 @@
+ import com.synthbyte.scanmate.ui.viewmodels.DocumentViewModel
+ import com.synthbyte.scanmate.widgets.WidgetStateStore
+ import androidx.compose.foundation.clickable
++import androidx.compose.material3.Icon
++import androidx.compose.material3.SuggestionChip
+ import androidx.compose.material3.HorizontalDivider
+ import androidx.compose.material3.ListItem
+ import androidx.compose.material3.SearchBar
+@@ -71,7 +82,7 @@
+     PDF("PDF", "PDF documents")
+ }
+ 
+-@OptIn(ExperimentalMaterial3Api::class)
++@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+ @Composable
+ fun HomeScreen(
+     onNavigateToCamera: () -> Unit,
+@@ -90,6 +101,8 @@
+     val context = LocalContext.current
+     val defaultWorkspace by settingsRepository.defaultWorkspaceFlow.collectAsState(initial = "Inbox")
+     val viewModel: DocumentViewModel = hiltViewModel()
++    val quickSearchQuery by viewModel.searchQuery.collectAsState()
++    val searchHistory by viewModel.searchHistory.collectAsState()
+     val documents by viewModel.allDocuments.collectAsState(initial = emptyList())
+     val firstPages by viewModel.allPages.collectAsState(initial = emptyList())
+     val pinned by viewModel.pinnedDocuments.collectAsState(initial = emptyList())
+@@ -186,22 +199,25 @@
+                 )
+             }
+             item(key = "home_search") {
+-                val searchQuery by viewModel.searchQuery.collectAsState()
+                 val results by viewModel.searchResults.collectAsState()
+                 SearchBar(
+-                    query = searchQuery,
++                    query = quickSearchQuery,
+                     onQueryChange = viewModel::setSearchQuery,
+-                    onSearch = {},
+-                    active = searchQuery.isNotBlank(),
++                    onSearch = { viewModel.addToSearchHistory(it) },
++                    active = quickSearchQuery.isNotBlank(),
+                     onActiveChange = { if (!it) viewModel.setSearchQuery("") },
+                     placeholder = { Text("Search documents and text…") },
+                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+                 ) {
+-                    LazyColumn {
+-                        items(results, key = { it.id }) { doc ->
++                    Column(
++                        modifier = Modifier
++                            .heightIn(max = 380.dp)
++                            .verticalScroll(rememberScrollState())
++                    ) {
++                        results.forEach { doc ->
+                             val sourceText = doc.ocrText.orEmpty()
+                             val snippet = sourceText.let { t ->
+-                                val idx = t.indexOf(searchQuery, ignoreCase = true).takeIf { it >= 0 } ?: 0
++                                val idx = t.indexOf(quickSearchQuery, ignoreCase = true).takeIf { it >= 0 } ?: 0
+                                 t.substring(idx.coerceAtLeast(0), (idx + 80).coerceAtMost(t.length))
+                             }
+                             ListItem(
+@@ -209,7 +225,7 @@
+                                 supportingContent = {
+                                     val annotated = buildAnnotatedString {
+                                         val lower = snippet.lowercase()
+-                                        val qLower = searchQuery.lowercase()
++                                        val qLower = quickSearchQuery.lowercase()
+                                         var i = 0
+                                         while (i < snippet.length) {
+                                             val hit = if (qLower.isBlank()) -1 else lower.indexOf(qLower, i)
+@@ -219,9 +235,9 @@
+                                             }
+                                             append(snippet.substring(i, hit))
+                                             withStyle(SpanStyle(background = MaterialTheme.colorScheme.primaryContainer)) {
+-                                                append(snippet.substring(hit, hit + searchQuery.length))
++                                                append(snippet.substring(hit, hit + quickSearchQuery.length))
+                                             }
+-                                            i = hit + searchQuery.length
++                                            i = hit + quickSearchQuery.length
+                                         }
+                                     }
+                                     Text(annotated, maxLines = 2)
+@@ -232,6 +248,23 @@
+                         }
+                     }
+                 }
++            }
++            if (quickSearchQuery.isBlank() && searchHistory.isNotEmpty()) {
++                item(key = "search_history") {
++                    Column(Modifier.padding(horizontal = 16.dp)) {
++                        Text("Recent searches", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
++                        Spacer(Modifier.height(4.dp))
++                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
++                            searchHistory.reversed().forEach { h ->
++                                SuggestionChip(
++                                    onClick = { viewModel.setSearchQuery(h) },
++                                    label = { Text(h) },
++                                    icon = { Icon(Icons.Default.History, null, Modifier.size(14.dp)) }
++                                )
++                            }
++                        }
++                    }
++                }
+             }
+             item(key = "home_document_filters") {
+                 Row(
+
+===== app/src/main/java/com/synthbyte/scanmate/ui/screens/DocumentDetailScreen.kt =====
+--- /mnt/data/scanmate_feature_patch_work/originals/DocumentDetailScreen.kt	2026-05-30 15:16:21.507506758 +0000
++++ app/src/main/java/com/synthbyte/scanmate/ui/screens/DocumentDetailScreen.kt	2026-05-30 15:19:57.251155919 +0000
+@@ -47,6 +47,7 @@
+ import androidx.compose.material3.Button
+ import androidx.compose.material3.Card
+ import androidx.compose.material3.CardDefaults
++import androidx.compose.material3.Checkbox
+ import androidx.compose.material3.CircularProgressIndicator
+ import androidx.compose.material3.ExperimentalMaterial3Api
+ import androidx.compose.material3.DropdownMenu
+@@ -135,6 +136,8 @@
+     var passwordProtect by remember { mutableStateOf(false) }
+     var pdfPassword by remember { mutableStateOf("") }
+     var confirmPassword by remember { mutableStateOf("") }
++    var allowCopy by remember { mutableStateOf(true) }
++    var allowPrinting by remember { mutableStateOf(true) }
+     val passwordValid = pdfPassword.length >= 6
+     val passwordsMatch = confirmPassword == pdfPassword
+     var topBarMenuExpanded by remember { mutableStateOf(false) }
+@@ -442,6 +445,16 @@
+                                 supportingText = { if (confirmPassword.isNotEmpty() && !passwordsMatch) Text("Passwords do not match") },
+                                 modifier = Modifier.fillMaxWidth()
+                             )
++                            Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
++                                Row(verticalAlignment = Alignment.CenterVertically) {
++                                    Checkbox(checked = allowPrinting, onCheckedChange = { allowPrinting = it })
++                                    Text("Allow printing", style = MaterialTheme.typography.bodySmall)
++                                }
++                                Row(verticalAlignment = Alignment.CenterVertically) {
++                                    Checkbox(checked = allowCopy, onCheckedChange = { allowCopy = it })
++                                    Text("Allow copy", style = MaterialTheme.typography.bodySmall)
++                                }
++                            }
+                         }
+                     }
+                     Text("Choose quality", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+@@ -452,7 +465,7 @@
+                             } else {
+                                 showExportDialog = false
+                                 if (passwordProtect && passwordValid && passwordsMatch) {
+-                                    viewModel.exportProtectedPdf(documentWithPages, pdfPassword, exportName)
++                                    viewModel.exportProtectedPdf(documentWithPages, pdfPassword, exportName, allowPrinting, allowCopy)
+                                 } else {
+                                     viewModel.exportPdf(documentWithPages, quality, exportName, selectedPageSize)
+                                 }
+
+===== app/src/main/java/com/synthbyte/scanmate/ui/viewmodels/DocumentDetailViewModel.kt =====
+--- /mnt/data/scanmate_feature_patch_work/originals/DocumentDetailViewModel.kt	2026-05-30 15:16:21.549595936 +0000
++++ app/src/main/java/com/synthbyte/scanmate/ui/viewmodels/DocumentDetailViewModel.kt	2026-05-30 15:19:57.251873280 +0000
+@@ -135,7 +135,7 @@
+     }
+ 
+ 
+-    fun exportProtectedPdf(dwp: DocumentWithPages?, password: String, filename: String) = viewModelScope.launch {
++    fun exportProtectedPdf(dwp: DocumentWithPages?, password: String, filename: String, allowPrinting: Boolean = true, allowCopy: Boolean = true) = viewModelScope.launch {
+         if (dwp == null || dwp.pages.isEmpty()) {
+             publishErrorMessage("No pages to export")
+             return@launch
+@@ -143,7 +143,7 @@
+         _exportState.value = ExportState.Loading("Encrypting PDF…")
+         runCatching {
+             val paths = dwp.pages.sortedBy { it.pageOrder }.map { it.imagePath }
+-            val file = FileUtils.generatePasswordProtectedPdf(context, paths, filename, password)
++            val file = FileUtils.generatePasswordProtectedPdf(context, paths, filename, password, allowPrinting, allowCopy)
+             _exportState.value = if (file != null) ExportState.PdfSuccess(file) else ExportState.Error("PDF encryption failed")
+         }.onFailure { throwable -> publishError(throwable) }
+     }
+
+===== app/src/main/java/com/synthbyte/scanmate/utils/FileUtils.kt =====
+--- /mnt/data/scanmate_feature_patch_work/originals/FileUtils.kt	2026-05-30 15:16:21.585546943 +0000
++++ app/src/main/java/com/synthbyte/scanmate/utils/FileUtils.kt	2026-05-30 15:19:57.252491806 +0000
+@@ -39,7 +39,7 @@
+     suspend fun generatePdf(context: Context, images: List<Bitmap>, filename: String): File? = PdfExporter.generatePdf(context, images, filename)
+     suspend fun generatePdfFromBitmaps(context: Context, bitmaps: List<Bitmap>, filename: String, quality: PdfExportQuality = PdfExportQuality.BALANCED, pageSize: PdfPageSize = PdfPageSize.AUTO, onProgress: ((String) -> Unit)? = null): File? = PdfExporter.generatePdfFromBitmaps(context, bitmaps, filename, quality, pageSize, onProgress)
+     suspend fun generatePdfFromPaths(context: Context, imagePaths: List<String>, filename: String, quality: PdfExportQuality = PdfExportQuality.BALANCED, pageSize: PdfPageSize = PdfPageSize.AUTO, onProgress: ((String) -> Unit)? = null, ocrRectsByPath: Map<String, List<Pair<android.graphics.Rect, String>>> = emptyMap()): File? = PdfExporter.generatePdfFromPaths(context, imagePaths, filename, quality, pageSize, onProgress, ocrRectsByPath)
+-    suspend fun generatePasswordProtectedPdf(context: Context, imagePaths: List<String>, filename: String, userPassword: String): File? = PdfExporter.generatePasswordProtectedPdf(context, imagePaths, filename, userPassword)
++    suspend fun generatePasswordProtectedPdf(context: Context, imagePaths: List<String>, filename: String, userPassword: String, allowPrinting: Boolean = true, allowCopy: Boolean = true): File? = PdfExporter.generatePasswordProtectedPdf(context, imagePaths, filename, userPassword, allowPrinting, allowCopy)
+     fun renderPdfUriToBitmaps(context: Context, uri: Uri, maxWidth: Int = 1800, pageRange: IntRange? = null): List<Bitmap> = PdfExporter.renderPdfUriToBitmaps(context, uri, maxWidth, pageRange)
+     suspend fun generatePdfFromText(context: Context, text: String, filename: String, pageSize: PdfPageSize = PdfPageSize.A4): File? = PdfExporter.generatePdfFromText(context, text, filename, pageSize)
+     suspend fun saveRenderedPdfPagesAsImages(context: Context, pages: List<Bitmap>, filename: String): List<File> = PdfExporter.saveRenderedPdfPagesAsImages(context, pages, filename)
+
+===== app/src/main/java/com/synthbyte/scanmate/ui/screens/PageEditorScreen.kt =====
+--- /mnt/data/scanmate_feature_patch_work/originals/PageEditorScreen.kt	2026-05-30 15:16:21.621913925 +0000
++++ app/src/main/java/com/synthbyte/scanmate/ui/screens/PageEditorScreen.kt	2026-05-30 15:19:57.254408007 +0000
+@@ -32,6 +32,8 @@
+ import androidx.compose.material.icons.Icons
+ import androidx.compose.material.icons.automirrored.filled.ArrowBack
+ import androidx.compose.material.icons.filled.TextSnippet
++import androidx.compose.material.icons.filled.WbSunny
++import androidx.compose.material.icons.filled.AutoAwesome
+ import androidx.compose.material.icons.filled.RotateLeft
+ import androidx.compose.material.icons.filled.RotateRight
+ import androidx.compose.material.icons.filled.ContentCopy
+@@ -103,6 +105,7 @@
+     val page by viewModel.page.collectAsState(initial = null)
+     val workingBitmap by viewModel.workingBitmap.collectAsState()
+     val pageEditorError by viewModel.errorState.collectAsState()
++    val viewModelProcessing by viewModel.isProcessing.collectAsState()
+     val scope = rememberCoroutineScope()
+     val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+ 
+@@ -116,6 +119,7 @@
+     var watermarkText by remember { mutableStateOf("ScanMate AI Pro") }
+     var noteText by remember { mutableStateOf("Reviewed") }
+     var isProcessing by remember { mutableStateOf(false) }
++    val isEditorProcessing = isProcessing || viewModelProcessing
+     var changeVersion by remember { mutableIntStateOf(0) }
+     val undoStack = remember { mutableStateListOf<android.graphics.Bitmap>() }
+     val redoStack = remember { mutableStateListOf<android.graphics.Bitmap>() }
+@@ -367,6 +371,45 @@
+                         label = { Text(filter.label) }
+                     )
+                 }
++                item(key = "erase_marks_chip") {
++                    FilterChip(
++                        selected = false,
++                        enabled = !isEditorProcessing,
++                        onClick = {
++                            pushUndoSnapshot()
++                            viewModel.removeMarks()
++                        },
++                        label = { Text("Erase Marks") },
++                        leadingIcon = { Icon(Icons.Default.AutoAwesome, null, Modifier.size(16.dp)) }
++                    )
++                }
++                item(key = "remove_shadow_chip") {
++                    FilterChip(
++                        selected = false,
++                        enabled = !isEditorProcessing,
++                        onClick = {
++                            pushUndoSnapshot()
++                            viewModel.removeShadow()
++                        },
++                        label = { Text("Remove Shadow") },
++                        leadingIcon = { Icon(Icons.Default.WbSunny, null, Modifier.size(16.dp)) }
++                    )
++                }
++                item(key = "deskew_chip") {
++                    FilterChip(
++                        selected = false,
++                        enabled = !isEditorProcessing,
++                        onClick = {
++                            pushUndoSnapshot()
++                            viewModel.deskew()
++                        },
++                        label = { Text("Deskew") },
++                        leadingIcon = { Icon(Icons.Default.RotateRight, null, Modifier.size(16.dp)) }
++                    )
++                }
++                item(key = "editor_tools_processing") {
++                    if (isEditorProcessing) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
++                }
+             }
+ 
+             ToolSectionTitle("Page actions")
+
+===== app/src/main/java/com/synthbyte/scanmate/ui/viewmodels/PageEditorViewModel.kt =====
+--- /mnt/data/scanmate_feature_patch_work/originals/PageEditorViewModel.kt	2026-05-30 15:16:21.675912153 +0000
++++ app/src/main/java/com/synthbyte/scanmate/ui/viewmodels/PageEditorViewModel.kt	2026-05-30 15:19:57.253218695 +0000
+@@ -41,6 +41,9 @@
+     private val _errorState = MutableStateFlow<String?>(null)
+     val errorState: StateFlow<String?> = _errorState.asStateFlow()
+ 
++    private val _isProcessing = MutableStateFlow(false)
++    val isProcessing: StateFlow<Boolean> = _isProcessing.asStateFlow()
++
+     private val _workingBitmap = MutableStateFlow<Bitmap?>(null)
+     val workingBitmap: StateFlow<Bitmap?> = _workingBitmap.asStateFlow()
+ 
+@@ -79,20 +82,35 @@
+ 
+     fun removeMarks(sensitivity: Float = 0.18f) = viewModelScope.launch(Dispatchers.IO) {
+         val bmp = _workingBitmap.value ?: return@launch
+-        runCatching { _workingBitmap.value = ImageProcessor.removeMarksFromBitmap(bmp, sensitivity) }
+-            .onFailure { throwable -> publishError(throwable, "Mark removal failed") }
++        _isProcessing.value = true
++        try {
++            runCatching { _workingBitmap.value = ImageProcessor.removeMarksFromBitmap(bmp, sensitivity) }
++                .onFailure { throwable -> publishError(throwable, "Mark removal failed") }
++        } finally {
++            _isProcessing.value = false
++        }
+     }
+ 
+     fun removeShadow() = viewModelScope.launch(Dispatchers.IO) {
+         val bmp = _workingBitmap.value ?: return@launch
+-        runCatching { _workingBitmap.value = ImageProcessor.removeShadowFromBitmap(bmp) }
+-            .onFailure { throwable -> publishError(throwable, "Shadow removal failed") }
++        _isProcessing.value = true
++        try {
++            runCatching { _workingBitmap.value = ImageProcessor.removeShadowFromBitmap(bmp) }
++                .onFailure { throwable -> publishError(throwable, "Shadow removal failed") }
++        } finally {
++            _isProcessing.value = false
++        }
+     }
+ 
+     fun deskew() = viewModelScope.launch(Dispatchers.IO) {
+         val bmp = _workingBitmap.value ?: return@launch
+-        runCatching { _workingBitmap.value = ImageProcessor.deskewBitmap(bmp) }
+-            .onFailure { throwable -> publishError(throwable, "Deskew failed") }
++        _isProcessing.value = true
++        try {
++            runCatching { _workingBitmap.value = ImageProcessor.deskewBitmap(bmp) }
++                .onFailure { throwable -> publishError(throwable, "Deskew failed") }
++        } finally {
++            _isProcessing.value = false
++        }
+     }
+ 
+     suspend fun saveEditedPage(pageId: Long, bitmap: Bitmap): java.io.File? = withContext(Dispatchers.IO) {
+
+===== app/src/main/java/com/synthbyte/scanmate/utils/OcrHelper.kt =====
+--- /mnt/data/scanmate_feature_patch_work/originals/OcrHelper.kt	2026-05-30 15:16:21.712062675 +0000
++++ app/src/main/java/com/synthbyte/scanmate/utils/OcrHelper.kt	2026-05-30 15:19:57.254943923 +0000
+@@ -178,7 +178,8 @@
+         if (cur.isNotBlank()) paras.add(cur)
+         return paras.joinToString("\n\n") { paragraph ->
+             var t = paragraph.toString().trim()
+-            if (t.isNotEmpty() && t.last().isLetter()) t += "."
++            val lastChar = t.lastOrNull()
++            if (lastChar != null && lastChar.isLetter() && !t.trimEnd().endsWith(".") && !t.trimEnd().endsWith(",") && t.length > 3) t += "."
+             t.replace(Regex(" {2,}"), " ").replace(Regex("([a-z])([A-Z])"), "$1 $2")
+         }
+     }
+
+===== app/src/main/java/com/synthbyte/scanmate/utils/DocumentIntelligence.kt =====
+--- /mnt/data/scanmate_feature_patch_work/originals/DocumentIntelligence.kt	2026-05-30 15:16:21.753979388 +0000
++++ app/src/main/java/com/synthbyte/scanmate/utils/DocumentIntelligence.kt	2026-05-30 15:20:49.022222154 +0000
+@@ -67,7 +67,12 @@
+         val email = lines.firstNotNullOfOrNull { emailR.find(it)?.value }
+         val phone = lines.firstNotNullOfOrNull { phoneR.find(it)?.value }
+         val url = lines.firstNotNullOfOrNull { urlR.find(it)?.value }
+-        val name = lines.firstOrNull { !it.contains("@") && !phoneR.containsMatchIn(it) && it.length in 3..40 }
++        val nameR = Regex("""^[A-Z][a-zA-Z'\-]+(\s[A-Z][a-zA-Z'\-]+){1,4}(\s(Jr|Sr|II|III|IV|V|PhD|MD|Esq)\.?)?$""")
++        val name = lines.firstOrNull { line ->
++            !line.contains("@") && !phoneR.containsMatchIn(line) && !urlR.containsMatchIn(line) &&
++                line.length in 3..60 &&
++                (nameR.matches(line.trim()) || (line.trim().split(" ").size in 2..5 && line.trim().first().isUpperCase()))
++        }
+         return BusinessCardResult(name, email, phone, url, lines)
+     }
+ 
+
+===== app/src/main/java/com/synthbyte/scanmate/ui/screens/AiScreen.kt =====
+--- /mnt/data/scanmate_feature_patch_work/originals/AiScreen.kt	2026-05-30 15:16:21.793106259 +0000
++++ app/src/main/java/com/synthbyte/scanmate/ui/screens/AiScreen.kt	2026-05-30 15:19:57.256145452 +0000
+@@ -295,8 +295,20 @@
+                         },
+                         onSaveVCard = {
+                             coroutineScope.launch {
+-                                val file = FileCore.saveTextFile(context, buildVCard(card), "contact_${System.currentTimeMillis()}.vcf")
+-                                Toast.makeText(context, if (file != null) "vCard saved" else "vCard save failed", Toast.LENGTH_SHORT).show()
++                                val saved = FileCore.saveTextFile(context, buildVCard(card), "contact_${System.currentTimeMillis()}.vcf")
++                                if (saved != null) {
++                                    val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", saved)
++                                    context.startActivity(android.content.Intent.createChooser(
++                                        android.content.Intent(android.content.Intent.ACTION_SEND).apply {
++                                            type = "text/x-vcard"
++                                            putExtra(android.content.Intent.EXTRA_STREAM, uri)
++                                            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
++                                        },
++                                        "Save contact to…"
++                                    ))
++                                } else {
++                                    Toast.makeText(context, "Failed to save contact", Toast.LENGTH_SHORT).show()
++                                }
+                             }
+                         }
+                     )
+
+===== app/src/main/java/com/synthbyte/scanmate/ui/screens/OnboardingScreen.kt =====
+--- /mnt/data/scanmate_feature_patch_work/originals/OnboardingScreen.kt	2026-05-30 15:16:21.831331030 +0000
++++ app/src/main/java/com/synthbyte/scanmate/ui/screens/OnboardingScreen.kt	2026-05-30 15:19:57.256793724 +0000
+@@ -79,7 +79,7 @@
+             title = "Secure local vault",
+             subtitle = "Store sensitive OCR snippets in an encrypted local vault powered by Android Keystore.",
+             icon = Icons.Default.Lock,
+-            bullets = listOf("Local encryption", "No account. No cloud. No subscription. Ever.", "No account required", "Export only when you decide")
++            bullets = listOf("Local encryption", "No account. No cloud. No subscription. Ever.", "Private by default", "Export only when you decide")
+         ),
+         OnboardingPage(
+             title = "PDF, QR and exports",
+

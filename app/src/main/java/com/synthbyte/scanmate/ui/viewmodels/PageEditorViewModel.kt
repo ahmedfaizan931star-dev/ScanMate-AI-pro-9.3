@@ -41,6 +41,9 @@ class PageEditorViewModel @Inject constructor(
     private val _errorState = MutableStateFlow<String?>(null)
     val errorState: StateFlow<String?> = _errorState.asStateFlow()
 
+    private val _isProcessing = MutableStateFlow(false)
+    val isProcessing: StateFlow<Boolean> = _isProcessing.asStateFlow()
+
     private val _workingBitmap = MutableStateFlow<Bitmap?>(null)
     val workingBitmap: StateFlow<Bitmap?> = _workingBitmap.asStateFlow()
 
@@ -79,20 +82,35 @@ class PageEditorViewModel @Inject constructor(
 
     fun removeMarks(sensitivity: Float = 0.18f) = viewModelScope.launch(Dispatchers.IO) {
         val bmp = _workingBitmap.value ?: return@launch
-        runCatching { _workingBitmap.value = ImageProcessor.removeMarksFromBitmap(bmp, sensitivity) }
-            .onFailure { throwable -> publishError(throwable, "Mark removal failed") }
+        _isProcessing.value = true
+        try {
+            runCatching { _workingBitmap.value = ImageProcessor.removeMarksFromBitmap(bmp, sensitivity) }
+                .onFailure { throwable -> publishError(throwable, "Mark removal failed") }
+        } finally {
+            _isProcessing.value = false
+        }
     }
 
     fun removeShadow() = viewModelScope.launch(Dispatchers.IO) {
         val bmp = _workingBitmap.value ?: return@launch
-        runCatching { _workingBitmap.value = ImageProcessor.removeShadowFromBitmap(bmp) }
-            .onFailure { throwable -> publishError(throwable, "Shadow removal failed") }
+        _isProcessing.value = true
+        try {
+            runCatching { _workingBitmap.value = ImageProcessor.removeShadowFromBitmap(bmp) }
+                .onFailure { throwable -> publishError(throwable, "Shadow removal failed") }
+        } finally {
+            _isProcessing.value = false
+        }
     }
 
     fun deskew() = viewModelScope.launch(Dispatchers.IO) {
         val bmp = _workingBitmap.value ?: return@launch
-        runCatching { _workingBitmap.value = ImageProcessor.deskewBitmap(bmp) }
-            .onFailure { throwable -> publishError(throwable, "Deskew failed") }
+        _isProcessing.value = true
+        try {
+            runCatching { _workingBitmap.value = ImageProcessor.deskewBitmap(bmp) }
+                .onFailure { throwable -> publishError(throwable, "Deskew failed") }
+        } finally {
+            _isProcessing.value = false
+        }
     }
 
     suspend fun saveEditedPage(pageId: Long, bitmap: Bitmap): java.io.File? = withContext(Dispatchers.IO) {

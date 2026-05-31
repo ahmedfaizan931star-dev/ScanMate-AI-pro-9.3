@@ -2,6 +2,7 @@ package com.synthbyte.scanmate.ui.screens
 
 import android.Manifest
 import android.content.Context
+import android.media.AudioManager
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
@@ -165,6 +166,7 @@ fun CameraScreen(
     var stableFrameCount by remember { mutableIntStateOf(0) }
     var detectedCorners by remember { mutableStateOf<List<Offset>?>(null) }
     var currentConfidence by remember { mutableStateOf(0f) }
+    val isLocked = currentConfidence >= 0.75f
     var selectedFilter by remember { mutableStateOf(FilterType.ORIGINAL) }
 
     fun finishDocument() {
@@ -279,6 +281,13 @@ fun CameraScreen(
         }
     }
 
+    LaunchedEffect(isLocked) {
+        if (isLocked) {
+            (context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager)
+                ?.playSoundEffect(AudioManager.FX_KEYPRESS_STANDARD, 0.5f)
+        }
+    }
+
     LaunchedEffect(lensFacing, quality, aspect, autoDetectEnabled) {
         cameraError = null
         runCatching {
@@ -373,6 +382,23 @@ fun CameraScreen(
         )
 
         DocumentOverlay(corners = detectedCorners, confidence = currentConfidence)
+
+        AnimatedVisibility(
+            visible = isLocked,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 154.dp)
+        ) {
+            Text(
+                text = "Document ready · Tap to capture",
+                color = Color.White,
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.88f), RoundedCornerShape(50))
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+            )
+        }
 
         Column(
             modifier = Modifier

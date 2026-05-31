@@ -67,7 +67,12 @@ val urlR = Regex("""(https?://|www\.)[^\s]+""")
         val email = lines.firstNotNullOfOrNull { emailR.find(it)?.value }
         val phone = lines.firstNotNullOfOrNull { phoneR.find(it)?.value }
         val url = lines.firstNotNullOfOrNull { urlR.find(it)?.value }
-        val name = lines.firstOrNull { !it.contains("@") && !phoneR.containsMatchIn(it) && it.length in 3..40 }
+        val nameR = Regex("""^[A-Z][a-zA-Z'\-]+(\s[A-Z][a-zA-Z'\-]+){1,4}(\s(Jr|Sr|II|III|IV|V|PhD|MD|Esq)\.?)?$""")
+        val name = lines.firstOrNull { line ->
+            !line.contains("@") && !phoneR.containsMatchIn(line) && !urlR.containsMatchIn(line) &&
+                line.length in 3..60 &&
+                (nameR.matches(line.trim()) || (line.trim().split(" ").size in 2..5 && line.trim().first().isUpperCase()))
+        }
         return BusinessCardResult(name, email, phone, url, lines)
     }
 

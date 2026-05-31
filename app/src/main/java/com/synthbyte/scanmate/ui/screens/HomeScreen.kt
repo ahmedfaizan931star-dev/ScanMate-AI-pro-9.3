@@ -7,11 +7,19 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -21,6 +29,7 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -54,6 +63,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.synthbyte.scanmate.ui.viewmodels.DocumentViewModel
 import com.synthbyte.scanmate.widgets.WidgetStateStore
 import androidx.compose.foundation.clickable
+import androidx.compose.material3.Icon
+import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.SearchBar
@@ -71,7 +82,7 @@ private enum class DocumentFilterMode(val label: String, val sectionTitle: Strin
     PDF("PDF", "PDF documents")
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun HomeScreen(
     onNavigateToCamera: () -> Unit,
@@ -90,6 +101,8 @@ fun HomeScreen(
     val context = LocalContext.current
     val defaultWorkspace by settingsRepository.defaultWorkspaceFlow.collectAsState(initial = "Inbox")
     val viewModel: DocumentViewModel = hiltViewModel()
+    val quickSearchQuery by viewModel.searchQuery.collectAsState()
+    val searchHistory by viewModel.searchHistory.collectAsState()
     val documents by viewModel.allDocuments.collectAsState(initial = emptyList())
     val firstPages by viewModel.allPages.collectAsState(initial = emptyList())
     val pinned by viewModel.pinnedDocuments.collectAsState(initial = emptyList())
@@ -186,22 +199,25 @@ fun HomeScreen(
                 )
             }
             item(key = "home_search") {
-                val searchQuery by viewModel.searchQuery.collectAsState()
                 val results by viewModel.searchResults.collectAsState()
                 SearchBar(
-                    query = searchQuery,
+                    query = quickSearchQuery,
                     onQueryChange = viewModel::setSearchQuery,
-                    onSearch = {},
-                    active = searchQuery.isNotBlank(),
+                    onSearch = { viewModel.addToSearchHistory(it) },
+                    active = quickSearchQuery.isNotBlank(),
                     onActiveChange = { if (!it) viewModel.setSearchQuery("") },
                     placeholder = { Text("Search documents and text…") },
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
                 ) {
-                    LazyColumn {
-                        items(results, key = { it.id }) { doc ->
+                    Column(
+                        modifier = Modifier
+                            .heightIn(max = 380.dp)
+                            .verticalScroll(rememberScrollState())
+                    ) {
+                        results.forEach { doc ->
                             val sourceText = doc.ocrText.orEmpty()
                             val snippet = sourceText.let { t ->
-                                val idx = t.indexOf(searchQuery, ignoreCase = true).takeIf { it >= 0 } ?: 0
+                                val idx = t.indexOf(quickSearchQuery, ignoreCase = true).takeIf { it >= 0 } ?: 0
                                 t.substring(idx.coerceAtLeast(0), (idx + 80).coerceAtMost(t.length))
                             }
                             ListItem(
@@ -209,7 +225,7 @@ fun HomeScreen(
                                 supportingContent = {
                                     val annotated = buildAnnotatedString {
                                         val lower = snippet.lowercase()
-                                        val qLower = searchQuery.lowercase()
+                                        val qLower = quickSearchQuery.lowercase()
                                         var i = 0
                                         while (i < snippet.length) {
                                             val hit = if (qLower.isBlank()) -1 else lower.indexOf(qLower, i)
@@ -219,9 +235,9 @@ fun HomeScreen(
                                             }
                                             append(snippet.substring(i, hit))
                                             withStyle(SpanStyle(background = MaterialTheme.colorScheme.primaryContainer)) {
-                                                append(snippet.substring(hit, hit + searchQuery.length))
+                                                append(snippet.substring(hit, hit + quickSearchQuery.length))
                                             }
-                                            i = hit + searchQuery.length
+                                            i = hit + quickSearchQuery.length
                                         }
                                     }
                                     Text(annotated, maxLines = 2)
@@ -229,6 +245,23 @@ fun HomeScreen(
                                 modifier = Modifier.clickable { onNavigateToDoc(doc.id) }
                             )
                             HorizontalDivider()
+                        }
+                    }
+                }
+            }
+            if (quickSearchQuery.isBlank() && searchHistory.isNotEmpty()) {
+                item(key = "search_history") {
+                    Column(Modifier.padding(horizontal = 16.dp)) {
+                        Text("Recent searches", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.height(4.dp))
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            searchHistory.reversed().forEach { h ->
+                                SuggestionChip(
+                                    onClick = { viewModel.setSearchQuery(h) },
+                                    label = { Text(h) },
+                                    icon = { Icon(Icons.Default.History, null, Modifier.size(14.dp)) }
+                                )
+                            }
                         }
                     }
                 }

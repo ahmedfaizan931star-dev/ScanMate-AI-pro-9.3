@@ -68,6 +68,7 @@ import androidx.compose.ui.text.style.TextAlign
 fun VaultScreen(onNavigateBack: () -> Unit) {
     val context = LocalContext.current
     var vaultUnlocked by remember { mutableStateOf(false) }
+    var authError by remember { mutableStateOf<String?>(null) }
     val biometricManager = BiometricManager.from(context)
     val canAuth = biometricManager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL)
     if (!vaultUnlocked) {
@@ -78,7 +79,9 @@ fun VaultScreen(onNavigateBack: () -> Unit) {
                     ContextCompat.getMainExecutor(context),
                     object : BiometricPrompt.AuthenticationCallback() {
                         override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) { vaultUnlocked = true }
-                        override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {}
+                        override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                            authError = errString.toString()
+                        }
                     }
                 )
                 prompt.authenticate(
@@ -97,6 +100,24 @@ fun VaultScreen(onNavigateBack: () -> Unit) {
                 Icon(Icons.Default.Fingerprint, null, Modifier.size(64.dp), tint = MaterialTheme.colorScheme.primary)
                 Text("Vault Locked", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold)
                 Text("Authenticate to access your encrypted documents.", style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+                authError?.let { err ->
+                    Spacer(Modifier.height(16.dp))
+                    Text(err, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(onClick = {
+                        authError = null
+                        val prompt = BiometricPrompt(context as FragmentActivity, ContextCompat.getMainExecutor(context),
+                            object : BiometricPrompt.AuthenticationCallback() {
+                                override fun onAuthenticationSucceeded(r: BiometricPrompt.AuthenticationResult) { vaultUnlocked = true }
+                                override fun onAuthenticationError(code: Int, msg: CharSequence) { authError = msg.toString() }
+                            })
+                        prompt.authenticate(BiometricPrompt.PromptInfo.Builder()
+                            .setTitle("Unlock Vault")
+                            .setSubtitle("Authenticate to access encrypted documents")
+                            .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL)
+                            .build())
+                    }) { Text("Try again") }
+                }
             }
         }
         return

@@ -47,6 +47,7 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.DropdownMenu
@@ -76,6 +77,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -133,6 +135,11 @@ fun DocumentDetailScreen(
     var selectedPageSize by remember { mutableStateOf(PdfPageSize.A4) }
     var passwordProtect by remember { mutableStateOf(false) }
     var pdfPassword by remember { mutableStateOf("") }
+    var confirmPassword by remember { mutableStateOf("") }
+    var allowCopy by remember { mutableStateOf(true) }
+    var allowPrinting by remember { mutableStateOf(true) }
+    val passwordValid = pdfPassword.length >= 6
+    val passwordsMatch = confirmPassword == pdfPassword
     var topBarMenuExpanded by remember { mutableStateOf(false) }
     var category by remember { mutableStateOf("General") }
     var tags by remember { mutableStateOf("") }
@@ -406,22 +413,62 @@ fun DocumentDetailScreen(
                         Text("Password protect PDF", style = MaterialTheme.typography.bodyMedium)
                     }
                     AnimatedVisibility(visible = passwordProtect) {
-                        OutlinedTextField(
-                            value = pdfPassword,
-                            onValueChange = { pdfPassword = it },
-                            label = { Text("PDF Password") },
-                            visualTransformation = PasswordVisualTransformation(),
-                            modifier = Modifier.fillMaxWidth()
-                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedTextField(
+                                value = pdfPassword,
+                                onValueChange = { pdfPassword = it },
+                                label = { Text("PDF Password") },
+                                visualTransformation = PasswordVisualTransformation(),
+                                isError = pdfPassword.isNotEmpty() && !passwordValid,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            if (pdfPassword.isNotEmpty() && !passwordValid) {
+                                Text("Minimum 6 characters required", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
+                            }
+                            if (pdfPassword.length >= 6) {
+                                val passwordStrength = when {
+                                    pdfPassword.length >= 12 && pdfPassword.any { it.isDigit() } && pdfPassword.any { !it.isLetterOrDigit() } -> Triple("Strong", 1f, Color(0xFF4CAF50))
+                                    pdfPassword.length >= 8 && (pdfPassword.any { it.isDigit() } || pdfPassword.any { !it.isLetterOrDigit() }) -> Triple("Fair", 0.6f, Color(0xFFFF9800))
+                                    else -> Triple("Weak", 0.3f, Color(0xFFF44336))
+                                }
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    LinearProgressIndicator(progress = { passwordStrength.second }, modifier = Modifier.weight(1f).height(4.dp), color = passwordStrength.third, trackColor = MaterialTheme.colorScheme.surfaceVariant)
+                                    Text(passwordStrength.first, style = MaterialTheme.typography.labelSmall, color = passwordStrength.third, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            OutlinedTextField(
+                                value = confirmPassword,
+                                onValueChange = { confirmPassword = it },
+                                label = { Text("Confirm Password") },
+                                visualTransformation = PasswordVisualTransformation(),
+                                isError = confirmPassword.isNotEmpty() && !passwordsMatch,
+                                supportingText = { if (confirmPassword.isNotEmpty() && !passwordsMatch) Text("Passwords do not match") },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Checkbox(checked = allowPrinting, onCheckedChange = { allowPrinting = it })
+                                    Text("Allow printing", style = MaterialTheme.typography.bodySmall)
+                                }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Checkbox(checked = allowCopy, onCheckedChange = { allowCopy = it })
+                                    Text("Allow copy", style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                        }
                     }
                     Text("Choose quality", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     PdfExportQuality.entries.forEach { quality ->
                         OutlinedButton(onClick = {
-                            showExportDialog = false
-                            if (passwordProtect && pdfPassword.isNotBlank()) {
-                                viewModel.exportProtectedPdf(documentWithPages, pdfPassword, exportName)
+                            if (passwordProtect && (!passwordValid || !passwordsMatch)) {
+                                Toast.makeText(context, "Enter matching password of at least 6 characters", Toast.LENGTH_SHORT).show()
                             } else {
-                                viewModel.exportPdf(documentWithPages, quality, exportName, selectedPageSize)
+                                showExportDialog = false
+                                if (passwordProtect && passwordValid && passwordsMatch) {
+                                    viewModel.exportProtectedPdf(documentWithPages, pdfPassword, exportName, allowPrinting, allowCopy)
+                                } else {
+                                    viewModel.exportPdf(documentWithPages, quality, exportName, selectedPageSize)
+                                }
                             }
                         }, modifier = Modifier.fillMaxWidth()) {
                             Column(horizontalAlignment = Alignment.Start, modifier = Modifier.fillMaxWidth()) {
