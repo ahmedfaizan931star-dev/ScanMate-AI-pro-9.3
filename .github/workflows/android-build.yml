@@ -36,11 +36,35 @@ jobs:
       - name: Build Debug APK
         run: ./gradlew clean assembleDebug --stacktrace
 
-      - name: Build Release APK
-        run: ./gradlew assembleRelease --stacktrace
+      - name: Prepare Release Keystore Directory
+        run: mkdir -p app/keystore
 
-      - name: Build Release AAB
+      - name: Decode Keystore
+        if: ${{ secrets.SIGNING_KEY != '' }}
+        run: |
+          echo "${{ secrets.SIGNING_KEY }}" | base64 --decode > app/keystore/scanmate-release.jks
+
+      - name: Build Release APK (Signed)
+        run: ./gradlew assembleRelease --stacktrace
+        env:
+          KEYSTORE_PATH: keystore/scanmate-release.jks
+          KEY_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+
+      - name: Build Release AAB (Signed)
         run: ./gradlew bundleRelease --stacktrace
+        env:
+          KEYSTORE_PATH: keystore/scanmate-release.jks
+          KEY_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+
+      - name: Verify APK Signature
+        run: |
+          $ANDROID_HOME/build-tools/34.0.0/apksigner verify \
+            --verbose \
+            app/build/outputs/apk/release/*.apk
 
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4

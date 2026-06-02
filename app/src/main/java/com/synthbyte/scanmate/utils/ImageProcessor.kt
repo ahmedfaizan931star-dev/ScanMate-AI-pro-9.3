@@ -21,6 +21,8 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 
+val ImageProcessingDispatcher = Dispatchers.Default.limitedParallelism(2)
+
 object ImageProcessor {
     suspend fun saveEditedBitmap(context: Context, bitmap: Bitmap, sourceName: String = "EDITED"): File? {
         val name = "${sourceName}_${System.currentTimeMillis()}"

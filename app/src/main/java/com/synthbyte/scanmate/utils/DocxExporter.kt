@@ -4,11 +4,14 @@ import android.content.Context
 import android.graphics.Bitmap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.BufferedOutputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.util.zip.ZipEntry
+import java.util.zip.CRC32
 import java.util.zip.ZipOutputStream
+import org.apache.poi.xwpf.usermodel.XWPFDocument
 
 object DocxExporter {
     suspend fun saveXlsxFromText(context: Context, text: String, filename: String): File? = withContext(Dispatchers.IO) {
@@ -279,92 +282,129 @@ object DocxExporter {
                 .removeSuffix(".DOCX")
             val file = File(storageDir, "$safeName.docx")
             val cleaned = DocumentIntelligence.cleanOcrText(text).ifBlank { "ScanMate AI Pro document export" }
-            val paragraphs = cleaned
-                .replace("\r\n", "\n")
-                .split("\u000C")
-                .flatMapIndexed { pageIndex, pageText ->
-                    val lines = pageText.lines().ifEmpty { listOf("") }
-                    buildList {
-                        if (pageIndex > 0) add("<w:p><w:r><w:br w:type=\"page\"/></w:r></w:p>")
-                        lines.forEach { line ->
-                            add("<w:p><w:r><w:t xml:space=\"preserve\">${escapeXml(line)}</w:t></w:r></w:p>")
-                        }
-                    }
-                }
-                .joinToString("\n")
-            ZipOutputStream(FileOutputStream(file).buffered()).use { zip ->
-                zip.putDocxEntry(
-                    "[Content_Types].xml",
-                    """
-                    <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-                    <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-                        <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
-                        <Default Extension="xml" ContentType="application/xml"/>
-                        <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
-                        <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
-                        <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
-                    </Types>
-                    """.trimIndent()
-                )
-                zip.putDocxEntry(
-                    "_rels/.rels",
-                    """
-                    <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-                    <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-                        <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
-                        <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>
-                        <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>
-                    </Relationships>
-                    """.trimIndent()
-                )
-                zip.putDocxEntry(
-                    "docProps/core.xml",
-                    """
-                    <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-                    <cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-                        <dc:title>${escapeXml(safeName)}</dc:title>
-                        <dc:creator>ScanMate AI Pro</dc:creator>
-                        <cp:lastModifiedBy>ScanMate AI Pro</cp:lastModifiedBy>
-                    </cp:coreProperties>
-                    """.trimIndent()
-                )
-                zip.putDocxEntry(
-                    "docProps/app.xml",
-                    """
-                    <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-                    <Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">
-                        <Application>ScanMate AI Pro</Application>
-                    </Properties>
-                    """.trimIndent()
-                )
-                zip.putDocxEntry(
-                    "word/_rels/document.xml.rels",
-                    """
-                    <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-                    <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>
-                    """.trimIndent()
-                )
-                zip.putDocxEntry(
-                    "word/document.xml",
-                    """
-                    <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-                    <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-                        <w:body>
-                            $paragraphs
-                            <w:sectPr>
-                                <w:pgSz w:w="12240" w:h="15840"/>
-                                <w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/>
-                            </w:sectPr>
-                        </w:body>
-                    </w:document>
-                    """.trimIndent()
-                )
-            }
+            exportDocx(cleaned, file)
             file.takeIf { it.exists() && it.length() > 0L }
         } catch (e: Exception) {
             e.printStackTrace()
             null
         }
+    }
+
+    fun exportDocx(text: String, file: File) {
+        val doc = XWPFDocument()
+        try {
+            text.split("\n").forEach { line ->
+                val para = doc.createParagraph()
+                val run = para.createRun()
+                run.setText(line.ifEmpty { " " })
+                run.fontFamily = "Calibri"
+                run.fontSize = 11
+            }
+            FileOutputStream(file).use { outputStream ->
+                doc.write(outputStream)
+            }
+        } finally {
+            doc.close()
+        }
+    }
+
+    private fun contentTypesXml(): String = """
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+    <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+    <Default Extension="xml" ContentType="application/xml"/>
+    <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+    <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
+    <Override PartName="/word/settings.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/>
+</Types>
+""".trimIndent()
+
+    private fun rootRelsXml(): String = """
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+    <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>
+""".trimIndent()
+
+    private fun wordRelsXml(): String = """
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>
+""".trimIndent()
+
+    private fun stylesXml(): String = """
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+    <w:docDefaults>
+        <w:rPrDefault>
+            <w:rPr>
+                <w:rFonts w:ascii="Aptos" w:hAnsi="Aptos" w:cs="Aptos"/>
+                <w:sz w:val="22"/>
+                <w:szCs w:val="22"/>
+            </w:rPr>
+        </w:rPrDefault>
+        <w:pPrDefault>
+            <w:pPr>
+                <w:spacing w:after="120" w:line="276" w:lineRule="auto"/>
+            </w:pPr>
+        </w:pPrDefault>
+    </w:docDefaults>
+    <w:style w:type="paragraph" w:default="1" w:styleId="Normal">
+        <w:name w:val="Normal"/>
+        <w:qFormat/>
+        <w:pPr>
+            <w:spacing w:after="120" w:line="276" w:lineRule="auto"/>
+        </w:pPr>
+        <w:rPr>
+            <w:rFonts w:ascii="Aptos" w:hAnsi="Aptos" w:cs="Aptos"/>
+            <w:sz w:val="22"/>
+            <w:szCs w:val="22"/>
+        </w:rPr>
+    </w:style>
+</w:styles>
+""".trimIndent()
+
+    private fun settingsXml(): String = """
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:settings xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+    <w:zoom w:percent="100"/>
+    <w:defaultTabStop w:val="720"/>
+    <w:compat/>
+</w:settings>
+""".trimIndent()
+
+    private fun buildDocumentXml(text: String): String {
+        val normalised = text.replace("\r\n", "\n").replace('\r', '\n')
+        val paragraphs = normalised.split("\n").joinToString("\n") { line ->
+            "<w:p><w:r><w:t xml:space=\"preserve\">${escapeXml(line)}</w:t></w:r></w:p>"
+        }.ifBlank {
+            "<w:p><w:r><w:t xml:space=\"preserve\">ScanMate AI Pro document export</w:t></w:r></w:p>"
+        }
+        return """
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+    <w:body>
+        $paragraphs
+        <w:sectPr>
+            <w:pgSz w:w="12240" w:h="15840"/>
+            <w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/>
+        </w:sectPr>
+    </w:body>
+</w:document>
+""".trimIndent()
+    }
+
+    private fun ZipOutputStream.putStoredXmlEntry(path: String, content: String) {
+        val bytes = content.toByteArray(Charsets.UTF_8)
+        val crc32 = CRC32().apply { update(bytes) }
+        val entry = ZipEntry(path).apply {
+            method = ZipEntry.STORED
+            size = bytes.size.toLong()
+            compressedSize = bytes.size.toLong()
+            this.crc = crc32.value
+        }
+        putNextEntry(entry)
+        write(bytes)
+        closeEntry()
     }
 
     private fun ZipOutputStream.putDocxEntry(path: String, content: String) {

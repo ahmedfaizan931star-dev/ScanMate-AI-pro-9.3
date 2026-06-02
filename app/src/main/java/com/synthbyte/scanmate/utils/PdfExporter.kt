@@ -2,6 +2,7 @@ package com.synthbyte.scanmate.utils
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -13,6 +14,11 @@ import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
+import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.pdmodel.encryption.AccessPermission
+import com.tom_roush.pdfbox.pdmodel.encryption.StandardProtectionPolicy
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import kotlin.math.max
@@ -38,25 +44,29 @@ object PdfExporter {
             val base = generatePdfFromPaths(context, imagePaths, safeBaseName, PdfExportQuality.BALANCED, PdfPageSize.A4)
                 ?: return@runCatching null
             val out = File(base.parent ?: return@runCatching null, "protected_${safeBaseName}.pdf")
-            val reader = com.itextpdf.text.pdf.PdfReader(base.absolutePath)
-            val stamper = com.itextpdf.text.pdf.PdfStamper(reader, out.outputStream())
-            var perms = 0
-            if (allowPrinting) perms = perms or com.itextpdf.text.pdf.PdfWriter.ALLOW_PRINTING
-            if (allowCopy) perms = perms or com.itextpdf.text.pdf.PdfWriter.ALLOW_COPY
-            stamper.setEncryption(
-                userPassword.toByteArray(Charsets.UTF_8),
-                ByteArray(32).also { java.security.SecureRandom().nextBytes(it) },
-                perms,
-                com.itextpdf.text.pdf.PdfWriter.ENCRYPTION_AES_128
-            )
-            stamper.close()
-            reader.close()
+            PDFBoxResourceLoader.init(context.applicationContext)
+            val pdDocument = PDDocument.load(base)
+            try {
+                val accessPermission = AccessPermission().also { permission ->
+                    permission.setCanPrint(allowPrinting)
+                    permission.setCanExtractContent(allowCopy)
+                }
+                val protection = StandardProtectionPolicy(userPassword, userPassword, accessPermission).apply {
+                    encryptionKeyLength = 128
+                }
+                pdDocument.protect(protection)
+                FileOutputStream(out).use { outputStream ->
+                    pdDocument.save(outputStream)
+                }
+            } finally {
+                pdDocument.close()
+            }
             base.delete()
             out.takeIf { it.exists() && it.length() > 0L }
         }.getOrNull()
     }
     suspend fun generatePdf(context: Context, images: List<Bitmap>, filename: String): File? = withContext(Dispatchers.IO) {
-        generatePdfInternal(context, images, filename, PdfPageSize.A4, null)
+        generatePdfInternal(context, images, filename, PdfPageSize.A4, null, PdfExportQuality.BALANCED)
     }
 
     suspend fun generatePdfFromBitmaps(
@@ -76,7 +86,7 @@ object PdfExporter {
             val scaled = bitmap.scaleDownToMax(maxSide) ?: return@mapNotNull null
             if (scaled === bitmap) bitmap.copy(Bitmap.Config.ARGB_8888, false) else scaled
         }
-        generatePdfInternal(context, prepared, filename, pageSize, onProgress)
+        generatePdfInternal(context, prepared, filename, pageSize, onProgress, quality)
     }
 
     suspend fun generatePdfFromPaths(
@@ -98,7 +108,7 @@ object PdfExporter {
             file.exists() && file.length() > 0L
         }
         if (validPaths.isEmpty()) return@withContext null
-        generatePdfInternalFromPaths(context, validPaths, targetSize, filename, pageSize, onProgress, ocrRectsByPath)
+        generatePdfInternalFromPaths(context, validPaths, targetSize, filename, pageSize, onProgress, ocrRectsByPath, quality)
     }
 
     private fun generatePdfInternalFromPaths(
@@ -108,7 +118,8 @@ object PdfExporter {
         filename: String,
         pageSize: PdfPageSize,
         onProgress: ((String) -> Unit)?,
-        ocrRectsByPath: Map<String, List<Pair<Rect, String>>>
+        ocrRectsByPath: Map<String, List<Pair<Rect, String>>>,
+        quality: PdfExportQuality
     ): File? {
         if (imagePaths.isEmpty()) return null
         val pdfDocument = PdfDocument()
@@ -118,18 +129,24 @@ object PdfExporter {
 
             imagePaths.forEach { path ->
                 val bitmap = ImageProcessor.decodeSampledBitmap(path, targetSize, targetSize) ?: return@forEach
+                var compressedBitmap: Bitmap? = null
                 try {
                     if (bitmap.width <= 0 || bitmap.height <= 0) return@forEach
+                    compressedBitmap = compressBitmap(bitmap, quality)
+                    val pageBitmap = compressedBitmap ?: bitmap
                     pageNumber += 1
                     onProgress?.invoke("Building page $pageNumber of ${imagePaths.size}")
-                    val dimensions = pageSize.resolveFor(bitmap)
+                    val dimensions = pageSize.resolveFor(pageBitmap)
                     val pageInfo = PdfDocument.PageInfo.Builder(dimensions.first, dimensions.second, pageNumber).create()
                     val page = pdfDocument.startPage(pageInfo)
                     page.canvas.drawRect(0f, 0f, dimensions.first.toFloat(), dimensions.second.toFloat(), whitePaint)
-                    page.canvas.letterbox(bitmap, dimensions.first, dimensions.second)
-                    page.canvas.drawInvisibleOcrLayer(bitmap, dimensions.first, dimensions.second, ocrRectsByPath[path].orEmpty())
+                    page.canvas.letterbox(pageBitmap, dimensions.first, dimensions.second)
+                    page.canvas.drawInvisibleOcrLayer(pageBitmap, dimensions.first, dimensions.second, ocrRectsByPath[path].orEmpty())
                     pdfDocument.finishPage(page)
                 } finally {
+                    compressedBitmap?.let { candidate ->
+                        if (candidate !== bitmap) runCatching { if (!candidate.isRecycled) candidate.recycle() }
+                    }
                     runCatching { if (!bitmap.isRecycled) bitmap.recycle() }
                 }
             }
@@ -161,7 +178,8 @@ object PdfExporter {
         images: List<Bitmap>,
         filename: String,
         pageSize: PdfPageSize,
-        onProgress: ((String) -> Unit)?
+        onProgress: ((String) -> Unit)?,
+        quality: PdfExportQuality
     ): File? {
         if (images.isEmpty()) return null
         val pdfDocument = PdfDocument()
@@ -169,17 +187,23 @@ object PdfExporter {
             val whitePaint = Paint().apply { color = Color.WHITE }
             var pageNumber = 0
             images.forEach { bitmap ->
+                var compressedBitmap: Bitmap? = null
                 try {
                     if (bitmap.width <= 0 || bitmap.height <= 0) return@forEach
+                    compressedBitmap = compressBitmap(bitmap, quality)
+                    val pageBitmap = compressedBitmap ?: bitmap
                     pageNumber += 1
                     onProgress?.invoke("Building page $pageNumber of ${images.size}")
-                    val dimensions = pageSize.resolveFor(bitmap)
+                    val dimensions = pageSize.resolveFor(pageBitmap)
                     val pageInfo = PdfDocument.PageInfo.Builder(dimensions.first, dimensions.second, pageNumber).create()
                     val page = pdfDocument.startPage(pageInfo)
                     page.canvas.drawRect(0f, 0f, dimensions.first.toFloat(), dimensions.second.toFloat(), whitePaint)
-                    page.canvas.letterbox(bitmap, dimensions.first, dimensions.second)
+                    page.canvas.letterbox(pageBitmap, dimensions.first, dimensions.second)
                     pdfDocument.finishPage(page)
                 } finally {
+                    compressedBitmap?.let { candidate ->
+                        if (candidate !== bitmap) runCatching { if (!candidate.isRecycled) candidate.recycle() }
+                    }
                     runCatching { if (!bitmap.isRecycled) bitmap.recycle() }
                 }
             }
@@ -204,6 +228,32 @@ object PdfExporter {
             } catch (_: Exception) {
             }
         }
+    }
+
+    private fun compressBitmap(bmp: Bitmap, q: PdfExportQuality): Bitmap {
+        val scale = when (q) {
+            PdfExportQuality.SMALL -> 0.50f
+            PdfExportQuality.BALANCED -> 0.75f
+            PdfExportQuality.HIGH -> 1.00f
+        }
+        val jpegQ = when (q) {
+            PdfExportQuality.SMALL -> 55
+            PdfExportQuality.BALANCED -> 78
+            PdfExportQuality.HIGH -> 94
+        }
+        val w = (bmp.width * scale).toInt().coerceAtLeast(1)
+        val h = (bmp.height * scale).toInt().coerceAtLeast(1)
+        val scaled = if (w == bmp.width && h == bmp.height) {
+            bmp.copy(Bitmap.Config.ARGB_8888, false)
+        } else {
+            Bitmap.createScaledBitmap(bmp, w, h, true)
+        }
+        val out = ByteArrayOutputStream()
+        scaled.compress(Bitmap.CompressFormat.JPEG, jpegQ, out)
+        val bytes = out.toByteArray()
+        val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        runCatching { if (!scaled.isRecycled) scaled.recycle() }
+        return decoded ?: bmp.copy(Bitmap.Config.ARGB_8888, false)
     }
 
     private fun Canvas.letterbox(bitmap: Bitmap, pageWidth: Int, pageHeight: Int) {

@@ -1,0 +1,7 @@
+
+# Android release signing secrets
+keystore/
+keystore.properties
+*.jks
+*.keystore
+app/keystore/

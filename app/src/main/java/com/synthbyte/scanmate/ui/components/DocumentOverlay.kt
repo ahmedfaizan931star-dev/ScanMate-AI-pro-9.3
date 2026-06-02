@@ -49,7 +49,7 @@ fun DocumentOverlay(corners: List<Offset>?, confidence: Float = 0f) {
     val isLocked = confidence >= 0.75f
     val animAlpha by animateFloatAsState(if (isLocked) 1f else pulseAlpha, animationSpec = tween(300), label = "overlay_alpha")
     val strokeEffect = if (isLocked) null else PathEffect.dashPathEffect(floatArrayOf(14f, 7f), phase = 0f)
-    val overlayColor = if (isLocked) Color(0xFF00E676) else Color(0xFF64B5F6)
+    val overlayColor = if (isLocked) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary
     val tl by animateOffsetAsState(corners[0].coercedUnit(), animationSpec = spring(stiffness = Spring.StiffnessMediumLow), label = "doc_tl")
     val tr by animateOffsetAsState(corners[1].coercedUnit(), animationSpec = spring(stiffness = Spring.StiffnessMediumLow), label = "doc_tr")
     val br by animateOffsetAsState(corners[2].coercedUnit(), animationSpec = spring(stiffness = Spring.StiffnessMediumLow), label = "doc_br")

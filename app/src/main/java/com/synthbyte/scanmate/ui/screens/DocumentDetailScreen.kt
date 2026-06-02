@@ -7,6 +7,7 @@ import android.graphics.Bitmap
 import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,6 +20,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -45,6 +47,7 @@ import androidx.compose.material.icons.filled.Tag
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
@@ -77,7 +80,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -109,6 +111,7 @@ import androidx.compose.material.icons.filled.Analytics
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Switch
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.window.DialogProperties
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -131,6 +134,7 @@ fun DocumentDetailScreen(
     var exportedDocx by remember { mutableStateOf<File?>(null) }
     var renameTitle by remember { mutableStateOf("") }
     var exportName by remember { mutableStateOf("") }
+    var selectedPdfQuality by remember { mutableStateOf(PdfExportQuality.BALANCED) }
     var exportProgress by remember { mutableStateOf<String?>(null) }
     var selectedPageSize by remember { mutableStateOf(PdfPageSize.A4) }
     var passwordProtect by remember { mutableStateOf(false) }
@@ -149,12 +153,30 @@ fun DocumentDetailScreen(
     LaunchedEffect(documentWithPages?.document?.title, documentWithPages?.document?.category, documentWithPages?.document?.tags, documentWithPages?.document?.workspace) {
         val title = documentWithPages?.document?.title.orEmpty()
         renameTitle = title
-        if (exportName.isBlank()) exportName = FileUtils.sanitizeFileBaseName(title.ifBlank { "ScanMate_${docId}" })
+        if (documentWithPages?.document != null && (exportName.isBlank() || exportName == "ScanMate_Export")) {
+            exportName = FileUtils.sanitizeFileBaseName(title)
+                .ifBlank { "ScanMate_Export" }
+        }
         category = documentWithPages?.document?.category ?: "General"
         tags = documentWithPages?.document?.tags.orEmpty()
         workspace = documentWithPages?.document?.workspace ?: "Inbox"
     }
 
+
+    fun onConfirmExport() {
+        if (passwordProtect && (!passwordValid || !passwordsMatch)) {
+            Toast.makeText(context, "Enter matching password of at least 6 characters", Toast.LENGTH_SHORT).show()
+            return
+        }
+        showExportDialog = false
+        val safeExportName = FileUtils.sanitizeFileBaseName(exportName)
+            .ifBlank { "ScanMate_Export" }
+        if (passwordProtect && passwordValid && passwordsMatch) {
+            viewModel.exportProtectedPdf(documentWithPages, pdfPassword, safeExportName, allowPrinting, allowCopy)
+        } else {
+            viewModel.exportPdf(documentWithPages, selectedPdfQuality, safeExportName, selectedPageSize)
+        }
+    }
 
     LaunchedEffect(exportState) {
         when (val state = exportState) {
@@ -391,9 +413,14 @@ fun DocumentDetailScreen(
     if (showExportDialog) {
         AlertDialog(
             onDismissRequest = { showExportDialog = false },
+            modifier = Modifier.fillMaxWidth(0.92f),
+            properties = DialogProperties(usePlatformDefaultWidth = false),
             title = { Text("Export PDF") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
                     OutlinedTextField(
                         value = exportName,
                         onValueChange = { exportName = it },
@@ -402,9 +429,22 @@ fun DocumentDetailScreen(
                         modifier = Modifier.fillMaxWidth()
                     )
                     Text("Choose page size", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
                         PdfPageSize.entries.forEach { size ->
-                            FilterChip(selected = selectedPageSize == size, onClick = { selectedPageSize = size }, label = { Text(size.label) })
+                            FilterChip(
+                                selected = selectedPageSize == size,
+                                onClick = { selectedPageSize = size },
+                                label = { Text(size.label, modifier = Modifier.padding(horizontal = 16.dp)) },
+                                modifier = Modifier
+                                    .wrapContentWidth()
+                                    .height(44.dp),
+                                shape = RoundedCornerShape(10.dp)
+                            )
                         }
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -427,9 +467,9 @@ fun DocumentDetailScreen(
                             }
                             if (pdfPassword.length >= 6) {
                                 val passwordStrength = when {
-                                    pdfPassword.length >= 12 && pdfPassword.any { it.isDigit() } && pdfPassword.any { !it.isLetterOrDigit() } -> Triple("Strong", 1f, Color(0xFF4CAF50))
-                                    pdfPassword.length >= 8 && (pdfPassword.any { it.isDigit() } || pdfPassword.any { !it.isLetterOrDigit() }) -> Triple("Fair", 0.6f, Color(0xFFFF9800))
-                                    else -> Triple("Weak", 0.3f, Color(0xFFF44336))
+                                    pdfPassword.length >= 12 && pdfPassword.any { it.isDigit() } && pdfPassword.any { !it.isLetterOrDigit() } -> Triple("Strong", 1f, MaterialTheme.colorScheme.primary)
+                                    pdfPassword.length >= 8 && (pdfPassword.any { it.isDigit() } || pdfPassword.any { !it.isLetterOrDigit() }) -> Triple("Fair", 0.6f, MaterialTheme.colorScheme.tertiary)
+                                    else -> Triple("Weak", 0.3f, MaterialTheme.colorScheme.error)
                                 }
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     LinearProgressIndicator(progress = { passwordStrength.second }, modifier = Modifier.weight(1f).height(4.dp), color = passwordStrength.third, trackColor = MaterialTheme.colorScheme.surfaceVariant)
@@ -459,28 +499,40 @@ fun DocumentDetailScreen(
                     }
                     Text("Choose quality", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     PdfExportQuality.entries.forEach { quality ->
-                        OutlinedButton(onClick = {
-                            if (passwordProtect && (!passwordValid || !passwordsMatch)) {
-                                Toast.makeText(context, "Enter matching password of at least 6 characters", Toast.LENGTH_SHORT).show()
-                            } else {
-                                showExportDialog = false
-                                if (passwordProtect && passwordValid && passwordsMatch) {
-                                    viewModel.exportProtectedPdf(documentWithPages, pdfPassword, exportName, allowPrinting, allowCopy)
-                                } else {
-                                    viewModel.exportPdf(documentWithPages, quality, exportName, selectedPageSize)
-                                }
-                            }
-                        }, modifier = Modifier.fillMaxWidth()) {
+                        OutlinedButton(
+                            onClick = { selectedPdfQuality = quality },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
                             Column(horizontalAlignment = Alignment.Start, modifier = Modifier.fillMaxWidth()) {
-                                Text(quality.label, fontWeight = FontWeight.Bold)
+                                Text(
+                                    if (selectedPdfQuality == quality) "${quality.label} ✓" else quality.label,
+                                    fontWeight = FontWeight.Bold
+                                )
                                 Text(quality.description, style = MaterialTheme.typography.bodySmall)
                             }
                         }
                     }
                 }
             },
-            confirmButton = {},
-            dismissButton = { TextButton(onClick = { showExportDialog = false }) { Text("Cancel") } }
+            confirmButton = {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = { showExportDialog = false },
+                        modifier = Modifier.weight(1f)
+                    ) { Text("Cancel") }
+                    Button(
+                        onClick = { onConfirmExport() },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary
+                        )
+                    ) { Text("Export PDF") }
+                }
+            },
+            dismissButton = {}
         )
     }
 

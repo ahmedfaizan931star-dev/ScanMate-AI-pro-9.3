@@ -13,10 +13,27 @@ val compileSdkOverride = providers.gradleProperty("SCANMATE_COMPILE_SDK").orElse
 val targetSdkOverride = providers.gradleProperty("SCANMATE_TARGET_SDK").orElse("35").get().toInt()
 val versionCodeOverride = (System.getenv("VERSION_CODE") ?: providers.gradleProperty("VERSION_CODE").orElse("5").get()).toInt()
 val versionNameOverride = System.getenv("VERSION_NAME") ?: providers.gradleProperty("VERSION_NAME").orElse("1.5.0").get()
+val signingProperties = java.util.Properties().apply {
+    val signingFile = rootProject.file("keystore.properties")
+    if (signingFile.exists()) {
+        signingFile.inputStream().use { input -> load(input) }
+    }
+}
 val releaseKeystorePath = System.getenv("KEYSTORE_PATH")
-val releaseStorePassword = System.getenv("STORE_PASSWORD")
-val releaseKeyAlias = System.getenv("KEY_ALIAS") ?: "upload"
+    ?: signingProperties.getProperty("storeFile")
+    ?: (project.findProperty("storeFile") as String?)
+    ?: "keystore/scanmate-release.jks"
+val releaseStorePassword = System.getenv("KEY_STORE_PASSWORD")
+    ?: System.getenv("STORE_PASSWORD")
+    ?: signingProperties.getProperty("storePassword")
+    ?: (project.findProperty("storePassword") as String?)
+val releaseKeyAlias = System.getenv("KEY_ALIAS")
+    ?: signingProperties.getProperty("keyAlias")
+    ?: (project.findProperty("keyAlias") as String?)
+    ?: "scanmate-key"
 val releaseKeyPassword = System.getenv("KEY_PASSWORD")
+    ?: signingProperties.getProperty("keyPassword")
+    ?: (project.findProperty("keyPassword") as String?)
 val hasReleaseSigning = !releaseKeystorePath.isNullOrBlank() &&
     !releaseStorePassword.isNullOrBlank() &&
     !releaseKeyPassword.isNullOrBlank()
@@ -37,13 +54,11 @@ android {
     }
 
     signingConfigs {
-        if (hasReleaseSigning) {
-            create("release") {
-                storeFile = file(releaseKeystorePath!!)
-                storePassword = releaseStorePassword!!
-                keyAlias = releaseKeyAlias
-                keyPassword = releaseKeyPassword!!
-            }
+        create("release") {
+            storeFile = file(releaseKeystorePath)
+            storePassword = releaseStorePassword ?: ""
+            keyAlias = releaseKeyAlias
+            keyPassword = releaseKeyPassword ?: ""
         }
     }
 
@@ -63,9 +78,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            if (hasReleaseSigning) {
-                signingConfig = signingConfigs.getByName("release")
-            }
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 
@@ -94,7 +107,13 @@ android {
             excludes += setOf(
                 "/META-INF/{AL2.0,LGPL2.1}",
                 "META-INF/LICENSE.md",
-                "META-INF/LICENSE-notice.md"
+                "META-INF/LICENSE-notice.md",
+                "META-INF/DEPENDENCIES",
+                "META-INF/LICENSE",
+                "META-INF/LICENSE.txt",
+                "META-INF/NOTICE",
+                "META-INF/NOTICE.txt",
+                "META-INF/INDEX.LIST"
             )
         }
     }
@@ -140,6 +159,8 @@ dependencies {
     implementation(libs.hilt.android)
     implementation(libs.androidx.biometric)
     implementation(libs.androidx.security.crypto)
+    implementation("com.tom-roush:pdfbox-android:2.0.27.0")
+    implementation("org.apache.poi:poi-ooxml:5.2.3")
 
     implementation("com.itextpdf:itextg:5.5.10")
     implementation("com.madgag.spongycastle:core:1.58.0.0")
