@@ -161,7 +161,7 @@ dependencies {
     implementation(libs.androidx.biometric)
     implementation(libs.androidx.security.crypto)
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
-    implementation("org.apache.poi:poi-ooxml:5.2.3")
+   implementation("org.apache.poi:poi-ooxml:5.2.2")
 
     implementation("com.itextpdf:itextg:5.5.10")
     implementation("com.madgag.spongycastle:core:1.58.0.0")
