@@ -8,10 +8,9 @@ import java.io.BufferedOutputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
-import java.util.zip.ZipEntry
 import java.util.zip.CRC32
+import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
-import org.apache.poi.xwpf.usermodel.XWPFDocument
 
 object DocxExporter {
     suspend fun saveXlsxFromText(context: Context, text: String, filename: String): File? = withContext(Dispatchers.IO) {
@@ -291,20 +290,13 @@ object DocxExporter {
     }
 
     fun exportDocx(text: String, file: File) {
-        val doc = XWPFDocument()
-        try {
-            text.split("\n").forEach { line ->
-                val para = doc.createParagraph()
-                val run = para.createRun()
-                run.setText(line.ifEmpty { " " })
-                run.fontFamily = "Calibri"
-                run.fontSize = 11
-            }
-            FileOutputStream(file).use { outputStream ->
-                doc.write(outputStream)
-            }
-        } finally {
-            doc.close()
+        ZipOutputStream(BufferedOutputStream(FileOutputStream(file))).use { zip ->
+            zip.putStoredXmlEntry("[Content_Types].xml", contentTypesXml())
+            zip.putDocxEntry("_rels/.rels", rootRelsXml())
+            zip.putDocxEntry("word/_rels/document.xml.rels", wordRelsXml())
+            zip.putDocxEntry("word/styles.xml", stylesXml())
+            zip.putDocxEntry("word/settings.xml", settingsXml())
+            zip.putDocxEntry("word/document.xml", buildDocumentXml(text))
         }
     }
 
