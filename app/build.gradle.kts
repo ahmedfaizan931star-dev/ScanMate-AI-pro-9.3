@@ -45,10 +45,6 @@ val hasReleaseSigning = releaseKeystorePath.isNotBlank() &&
     !releaseStorePassword.isNullOrBlank() &&
     !releaseKeyPassword.isNullOrBlank()
 
-configurations.all {
-    resolutionStrategy.force("org.apache.logging.log4j:log4j-api:2.12.4")
-}
-
 android {
     namespace = "com.synthbyte.scanmate"
     compileSdk = compileSdkOverride
@@ -170,11 +166,8 @@ dependencies {
     implementation(libs.hilt.android)
     implementation(libs.androidx.biometric)
     implementation(libs.androidx.security.crypto)
+
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
-    implementation("org.apache.poi:poi-ooxml-lite:5.2.5") {
-        exclude(group = "org.apache.logging.log4j", module = "log4j-api")
-    }
-    implementation("org.apache.logging.log4j:log4j-api:2.12.4")
 
     implementation("com.itextpdf:itextg:5.5.10")
     implementation("com.madgag.spongycastle:core:1.58.0.0")
