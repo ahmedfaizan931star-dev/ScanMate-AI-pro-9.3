@@ -1,4 +1,5 @@
 import java.util.Locale
+import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
@@ -13,7 +14,7 @@ val compileSdkOverride = providers.gradleProperty("SCANMATE_COMPILE_SDK").orElse
 val targetSdkOverride = providers.gradleProperty("SCANMATE_TARGET_SDK").orElse("35").get().toInt()
 val versionCodeOverride = (System.getenv("VERSION_CODE") ?: providers.gradleProperty("VERSION_CODE").orElse("5").get()).toInt()
 val versionNameOverride = System.getenv("VERSION_NAME") ?: providers.gradleProperty("VERSION_NAME").orElse("1.5.0").get()
-val signingProperties = java.util.Properties().apply {
+val signingProperties = Properties().apply {
     val signingFile = rootProject.file("keystore.properties")
     if (signingFile.exists()) {
         signingFile.inputStream().use { input -> load(input) }
