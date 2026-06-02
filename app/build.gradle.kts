@@ -14,30 +14,40 @@ val compileSdkOverride = providers.gradleProperty("SCANMATE_COMPILE_SDK").orElse
 val targetSdkOverride = providers.gradleProperty("SCANMATE_TARGET_SDK").orElse("35").get().toInt()
 val versionCodeOverride = (System.getenv("VERSION_CODE") ?: providers.gradleProperty("VERSION_CODE").orElse("5").get()).toInt()
 val versionNameOverride = System.getenv("VERSION_NAME") ?: providers.gradleProperty("VERSION_NAME").orElse("1.5.0").get()
+
 val signingProperties = Properties().apply {
     val signingFile = rootProject.file("keystore.properties")
     if (signingFile.exists()) {
         signingFile.inputStream().use { input -> load(input) }
     }
 }
+
 val releaseKeystorePath = System.getenv("KEYSTORE_PATH")
     ?: signingProperties.getProperty("storeFile")
     ?: (project.findProperty("storeFile") as String?)
     ?: "keystore/scanmate-release.jks"
+
 val releaseStorePassword = System.getenv("KEY_STORE_PASSWORD")
     ?: System.getenv("STORE_PASSWORD")
     ?: signingProperties.getProperty("storePassword")
     ?: (project.findProperty("storePassword") as String?)
+
 val releaseKeyAlias = System.getenv("KEY_ALIAS")
     ?: signingProperties.getProperty("keyAlias")
     ?: (project.findProperty("keyAlias") as String?)
     ?: "scanmate-key"
+
 val releaseKeyPassword = System.getenv("KEY_PASSWORD")
     ?: signingProperties.getProperty("keyPassword")
     ?: (project.findProperty("keyPassword") as String?)
-val hasReleaseSigning = !releaseKeystorePath.isNullOrBlank() &&
+
+val hasReleaseSigning = releaseKeystorePath.isNotBlank() &&
     !releaseStorePassword.isNullOrBlank() &&
     !releaseKeyPassword.isNullOrBlank()
+
+configurations.all {
+    resolutionStrategy.force("org.apache.logging.log4j:log4j-api:2.12.4")
+}
 
 android {
     namespace = "com.synthbyte.scanmate"
@@ -161,7 +171,10 @@ dependencies {
     implementation(libs.androidx.biometric)
     implementation(libs.androidx.security.crypto)
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
-   implementation("org.apache.poi:poi-ooxml-lite:5.2.5")
+    implementation("org.apache.poi:poi-ooxml-lite:5.2.5") {
+        exclude(group = "org.apache.logging.log4j", module = "log4j-api")
+    }
+    implementation("org.apache.logging.log4j:log4j-api:2.12.4")
 
     implementation("com.itextpdf:itextg:5.5.10")
     implementation("com.madgag.spongycastle:core:1.58.0.0")
