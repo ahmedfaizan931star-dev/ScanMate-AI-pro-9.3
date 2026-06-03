@@ -18,9 +18,11 @@ import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.encryption.AccessPermission
 import com.tom_roush.pdfbox.pdmodel.encryption.StandardProtectionPolicy
+import android.util.Base64
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
+import java.security.SecureRandom
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -51,7 +53,10 @@ object PdfExporter {
                     permission.setCanPrint(allowPrinting)
                     permission.setCanExtractContent(allowCopy)
                 }
-                val protection = StandardProtectionPolicy(userPassword, userPassword, accessPermission).apply {
+                val ownerPasswordBytes = ByteArray(32)
+                SecureRandom().nextBytes(ownerPasswordBytes)
+                val ownerPassword = Base64.encodeToString(ownerPasswordBytes, Base64.NO_WRAP)
+                val protection = StandardProtectionPolicy(ownerPassword, userPassword, accessPermission).apply {
                     encryptionKeyLength = 128
                 }
                 pdDocument.protect(protection)
