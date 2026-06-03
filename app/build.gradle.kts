@@ -168,10 +168,6 @@ dependencies {
     implementation(libs.androidx.security.crypto)
 
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
-    org.apache.poi
-log4j
-poi-ooxml
-XWPF
 
     implementation("com.itextpdf:itextg:5.5.10")
     implementation("com.madgag.spongycastle:core:1.58.0.0")
