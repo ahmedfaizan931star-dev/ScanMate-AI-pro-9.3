@@ -71,7 +71,11 @@ android {
 
     defaultConfig {
         applicationId = "com.synthbyte.scanmate"
-        minSdk = 24
+
+        // Required because Apache POI 5.2.3 / Log4j use MethodHandle APIs
+        // that D8 cannot dex for minSdk 24/25.
+        minSdk = 26
+
         targetSdk = targetSdkOverride
         versionCode = versionCodeOverride
         versionName = versionNameOverride
