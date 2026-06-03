@@ -51,3 +51,50 @@
 -dontwarn androidx.security.crypto.**
 -keep class com.google.crypto.tink.** { *; }
 -dontwarn com.google.crypto.tink.**
+
+
+
+# ============================================================
+# ScanMate AI Pro - Release R8 compatibility rules
+# Reason:
+# Apache POI, XMLBeans, PDFBox Android, and Log4j reference
+# optional desktop/server classes that are not available on Android.
+# Debug builds pass, but Release R8 fails unless these optional
+# references are ignored.
+# ============================================================
+
+# PDFBox Android optional JPEG2000 encoder/decoder
+-dontwarn com.gemalto.jp2.**
+-dontwarn com.tom_roush.pdfbox.filter.JPXFilter
+
+# Java AWT desktop classes referenced by Apache POI optional rendering/debug paths
+-dontwarn java.awt.**
+-dontwarn java.awt.color.**
+-dontwarn java.awt.font.**
+-dontwarn java.awt.geom.**
+-dontwarn java.awt.image.**
+
+# XMLBeans / POI optional StAX references
+-dontwarn javax.xml.stream.**
+-dontwarn org.apache.xmlbeans.**
+
+# Saxon optional XPath backend used by XMLBeans if present
+-dontwarn net.sf.saxon.**
+
+# Batik optional SVG rendering used by Apache POI slideshow/image code
+-dontwarn org.apache.batik.**
+
+# OSGi optional service loading used by Log4j
+-dontwarn org.osgi.**
+
+# Logging optional integrations
+-dontwarn org.apache.logging.log4j.**
+
+# Keep core POI/XMLBeans classes used for DOCX generation
+-keep class org.apache.poi.** { *; }
+-keep class org.openxmlformats.schemas.** { *; }
+-keep class com.microsoft.schemas.** { *; }
+-keep class org.apache.xmlbeans.** { *; }
+
+# Keep PDFBox Android classes used for PDF processing/export
+-keep class com.tom_roush.pdfbox.** { *; }
