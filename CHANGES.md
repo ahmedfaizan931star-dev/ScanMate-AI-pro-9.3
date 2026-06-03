@@ -143,3 +143,28 @@ Exit code: `1`
 
 ### UI color safety check
 - `app/src/main/java/com/synthbyte/scanmate/ui/components/DocumentOverlay.kt`: line 52 uses `MaterialTheme.colorScheme` for the animated overlay color instead of hardcoded UI hex colors.
+
+## GitHub Actions release-signing hardening — 2026-06-03
+
+Changed files:
+- `.github/workflows/android-build.yml`
+  - Added `HAS_RELEASE_SIGNING` gate so CI builds unsigned release artifacts when signing secrets are missing instead of failing on a missing keystore.
+  - Decodes the release keystore only when all required signing secrets are present. Supports either `KEY_STORE_PASSWORD` or legacy `STORE_PASSWORD`.
+  - Verifies APK signatures only for signed release builds.
+  - Uses the newest installed Android build-tools directory instead of hardcoding `34.0.0`.
+  - Adds `if-no-files-found: error` for artifact uploads so CI fails clearly if outputs are missing.
+- `app/build.gradle.kts`
+  - Ignores placeholder signing values such as `YOUR_KEYSTORE_PASSWORD`.
+  - Applies the release signing config only when the keystore file exists and all signing values are real.
+  - Allows `assembleRelease` and `bundleRelease` to complete unsigned in CI when secrets are not configured.
+- `keystore.properties`
+  - Removed committed placeholder local signing file.
+- `keystore.properties.example`
+  - Added safe local template for developers.
+- `README.md`
+  - Documented signed and unsigned GitHub Actions behavior and the safe local signing template flow.
+
+Expected GitHub Actions behavior:
+- Without signing secrets: debug APK, unsigned release APK, and unsigned release AAB are built and uploaded for validation.
+- With signing secrets: debug APK, signed release APK, signed release AAB are built; APK signature verification runs.
+

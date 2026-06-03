@@ -1,5 +1,4 @@
 import java.util.Locale
-import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
@@ -14,36 +13,46 @@ val compileSdkOverride = providers.gradleProperty("SCANMATE_COMPILE_SDK").orElse
 val targetSdkOverride = providers.gradleProperty("SCANMATE_TARGET_SDK").orElse("35").get().toInt()
 val versionCodeOverride = (System.getenv("VERSION_CODE") ?: providers.gradleProperty("VERSION_CODE").orElse("5").get()).toInt()
 val versionNameOverride = System.getenv("VERSION_NAME") ?: providers.gradleProperty("VERSION_NAME").orElse("1.5.0").get()
-
-val signingProperties = Properties().apply {
+val signingProperties = java.util.Properties().apply {
     val signingFile = rootProject.file("keystore.properties")
     if (signingFile.exists()) {
         signingFile.inputStream().use { input -> load(input) }
     }
 }
 
+fun String?.isUsableSigningValue(): Boolean =
+    !isNullOrBlank() && !trim().startsWith("YOUR_", ignoreCase = true)
+
 val releaseKeystorePath = System.getenv("KEYSTORE_PATH")
     ?: signingProperties.getProperty("storeFile")
     ?: (project.findProperty("storeFile") as String?)
     ?: "keystore/scanmate-release.jks"
-
 val releaseStorePassword = System.getenv("KEY_STORE_PASSWORD")
+    ?: System.getenv("SCANMATE_STORE_PASSWORD")
     ?: System.getenv("STORE_PASSWORD")
     ?: signingProperties.getProperty("storePassword")
     ?: (project.findProperty("storePassword") as String?)
-
 val releaseKeyAlias = System.getenv("KEY_ALIAS")
     ?: signingProperties.getProperty("keyAlias")
     ?: (project.findProperty("keyAlias") as String?)
     ?: "scanmate-key"
-
 val releaseKeyPassword = System.getenv("KEY_PASSWORD")
     ?: signingProperties.getProperty("keyPassword")
     ?: (project.findProperty("keyPassword") as String?)
+val releaseKeystoreFile = file(releaseKeystorePath)
+val requireReleaseSigning = System.getenv("SCANMATE_REQUIRE_RELEASE_SIGNING")
+    ?.equals("true", ignoreCase = true) == true
+val hasReleaseSigning = releaseKeystoreFile.exists() &&
+    releaseStorePassword.isUsableSigningValue() &&
+    releaseKeyAlias.isUsableSigningValue() &&
+    releaseKeyPassword.isUsableSigningValue()
 
-val hasReleaseSigning = releaseKeystorePath.isNotBlank() &&
-    !releaseStorePassword.isNullOrBlank() &&
-    !releaseKeyPassword.isNullOrBlank()
+if (requireReleaseSigning && !hasReleaseSigning) {
+    throw GradleException(
+        "Release signing is required but not fully configured. " +
+            "Check KEYSTORE_PATH, KEY_STORE_PASSWORD/STORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD, and the decoded keystore file."
+    )
+}
 
 android {
     namespace = "com.synthbyte.scanmate"
@@ -61,11 +70,13 @@ android {
     }
 
     signingConfigs {
-        create("release") {
-            storeFile = file(releaseKeystorePath)
-            storePassword = releaseStorePassword ?: ""
-            keyAlias = releaseKeyAlias
-            keyPassword = releaseKeyPassword ?: ""
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = releaseKeystoreFile
+                storePassword = releaseStorePassword.orEmpty()
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword.orEmpty()
+            }
         }
     }
 
@@ -85,7 +96,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.getByName("release")
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
@@ -166,8 +179,8 @@ dependencies {
     implementation(libs.hilt.android)
     implementation(libs.androidx.biometric)
     implementation(libs.androidx.security.crypto)
-
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
+    implementation("org.apache.poi:poi-ooxml:5.2.3")
 
     implementation("com.itextpdf:itextg:5.5.10")
     implementation("com.madgag.spongycastle:core:1.58.0.0")

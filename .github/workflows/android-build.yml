@@ -2,8 +2,9 @@ name: Build ScanMate AI Pro
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -11,9 +12,14 @@ permissions:
 
 jobs:
   build:
-    name: Build Debug + Signed Release
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 45
+    env:
+      SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+      KEY_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}
+      STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+      KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+      KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
 
     steps:
       - name: Checkout repository
@@ -24,64 +30,91 @@ jobs:
         with:
           distribution: temurin
           java-version: 21
-          cache: gradle
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           validate-wrappers: false
 
-      - name: Make Gradle wrapper executable
+      - name: Make gradlew executable
         run: chmod +x ./gradlew
+
+      - name: Validate required release signing secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          STORE_PASSWORD_VALUE="${KEY_STORE_PASSWORD:-${STORE_PASSWORD:-}}"
+          missing=0
+
+          if [[ -z "${SIGNING_KEY:-}" ]]; then
+            echo "::error::Missing GitHub secret SIGNING_KEY. Add the base64-encoded release .jks file."
+            missing=1
+          fi
+
+          if [[ -z "$STORE_PASSWORD_VALUE" ]]; then
+            echo "::error::Missing GitHub secret KEY_STORE_PASSWORD. STORE_PASSWORD is also accepted for old setups."
+            missing=1
+          fi
+
+          if [[ -z "${KEY_ALIAS:-}" ]]; then
+            echo "::error::Missing GitHub secret KEY_ALIAS."
+            missing=1
+          fi
+
+          if [[ -z "${KEY_PASSWORD:-}" ]]; then
+            echo "::error::Missing GitHub secret KEY_PASSWORD."
+            missing=1
+          fi
+
+          if [[ "$missing" -ne 0 ]]; then
+            exit 1
+          fi
+
+          {
+            echo "SCANMATE_STORE_PASSWORD=$STORE_PASSWORD_VALUE"
+            echo "SCANMATE_REQUIRE_RELEASE_SIGNING=true"
+          } >> "$GITHUB_ENV"
+
+      - name: Prepare Release Keystore Directory
+        run: mkdir -p app/keystore
+
+      - name: Decode Release Keystore
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' "$SIGNING_KEY" | base64 --decode > app/keystore/scanmate-release.jks
+          test -s app/keystore/scanmate-release.jks
+
+      - name: Validate Release Keystore Alias
+        shell: bash
+        run: |
+          set -euo pipefail
+          keytool -list \
+            -keystore app/keystore/scanmate-release.jks \
+            -storepass "$SCANMATE_STORE_PASSWORD" \
+            -alias "$KEY_ALIAS" \
+            -v >/dev/null
 
       - name: Build Debug APK
         run: ./gradlew clean assembleDebug --stacktrace
 
-      - name: Validate signing secrets
-        run: |
-          test -n "$SIGNING_KEY" || (echo "Missing SIGNING_KEY" && exit 1)
-          test -n "$KEY_STORE_PASSWORD" || (echo "Missing KEY_STORE_PASSWORD" && exit 1)
-          test -n "$KEY_ALIAS" || (echo "Missing KEY_ALIAS" && exit 1)
-          test -n "$KEY_PASSWORD" || (echo "Missing KEY_PASSWORD" && exit 1)
-        env:
-          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
-          KEY_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-
-      - name: Decode release keystore
-        run: |
-          mkdir -p app/keystore
-          echo "$SIGNING_KEY" | base64 --decode > app/keystore/scanmate-release.jks
-          ls -lh app/keystore/scanmate-release.jks
-        env:
-          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
-
-      - name: Build Signed Release APK
+      - name: Build Release APK Signed
         run: ./gradlew assembleRelease --stacktrace
         env:
           KEYSTORE_PATH: keystore/scanmate-release.jks
-          KEY_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
 
-      - name: Build Signed Release AAB
+      - name: Build Release AAB Signed
         run: ./gradlew bundleRelease --stacktrace
         env:
           KEYSTORE_PATH: keystore/scanmate-release.jks
-          KEY_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
 
       - name: Verify Release APK Signature
+        shell: bash
         run: |
-          APK_FILE="$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)"
-          if [ -z "$APK_FILE" ]; then
-            echo "No release APK found"
-            exit 1
-          fi
-          echo "Verifying: $APK_FILE"
-          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --verbose "$APK_FILE"
+          set -euo pipefail
+          BUILD_TOOLS_DIR="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+          "$BUILD_TOOLS_DIR/apksigner" verify --verbose app/build/outputs/apk/release/*.apk
 
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
@@ -93,13 +126,13 @@ jobs:
       - name: Upload Signed Release APK
         uses: actions/upload-artifact@v4
         with:
-          name: ScanMate-AI-Pro-signed-release-apk
+          name: ScanMate-AI-Pro-release-apk-signed
           path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
 
       - name: Upload Signed Release AAB
         uses: actions/upload-artifact@v4
         with:
-          name: ScanMate-AI-Pro-signed-release-aab
+          name: ScanMate-AI-Pro-release-aab-signed
           path: app/build/outputs/bundle/release/*.aab
           if-no-files-found: error

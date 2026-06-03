@@ -1,22 +1,7 @@
-# Gradle
-.gradle/
-build/
-app/build/
 
 # Android release signing secrets
 keystore/
 keystore.properties
 *.jks
 *.keystore
-signing_key_base64.txt
-
-# Build outputs
-*.apk
-*.aab
-*.zip
-
-# Logs
-*.log
-
-# OS files
-.DS_Store
+app/keystore/

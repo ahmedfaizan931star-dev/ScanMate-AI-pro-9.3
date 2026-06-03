@@ -35,8 +35,12 @@ app/build/outputs/apk/release/app-release.apk
 app/build/outputs/bundle/release/app-release.aab
 ```
 
-If signing variables are missing, the APK output may be unsigned:
+In GitHub Actions, release signing is mandatory. If signing variables are missing or the keystore alias is wrong, CI fails before uploading release artifacts.
 
-```text
-app/build/outputs/apk/release/app-release-unsigned.apk
+For strict local validation matching CI:
+
+```bash
+export SCANMATE_REQUIRE_RELEASE_SIGNING=true
+./gradlew assembleRelease --no-daemon --stacktrace
+./gradlew bundleRelease --no-daemon --stacktrace
 ```
