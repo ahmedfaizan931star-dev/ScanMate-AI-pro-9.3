@@ -5,3 +5,12 @@ keystore.properties
 *.jks
 *.keystore
 app/keystore/
+
+.gradle/
+build/
+app/build/
+*.log
+local.properties
+.idea/
+*.iml
+.DS_Store

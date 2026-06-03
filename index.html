@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ScanMate AI Pro</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons+Outlined">
+</head>
+<body>
+    <div id="app">
+        <!-- Home Screen -->
+        <section id="home-screen" class="screen active">
+            <header class="header">
+                <div class="brand-zone">
+                    <span class="brand-label">SCANMATE AI PRO</span>
+                    <h1 class="screen-title">Your Documents</h1>
+                </div>
+                <div class="header-actions">
+                    <button class="icon-btn" id="ai-btn"><span class="material-icons-outlined">auto_awesome</span></button>
+                    <button class="icon-btn" id="settings-btn"><span class="material-icons-outlined">settings</span></button>
+                </div>
+            </header>
+
+            <div class="search-bar">
+                <span class="material-icons-outlined">search</span>
+                <input type="text" id="search-input" placeholder="Search documents, OCR, tags…">
+            </div>
+
+            <div class="hero-card">
+                <div class="hero-content">
+                    <span class="today-label">TODAY</span>
+                    <h2>Scan a document or import from gallery</h2>
+                    <p>Auto-cropped, OCR-ready, searchable, exportable and private.</p>
+                </div>
+                <div class="hero-actions">
+                    <button class="btn btn-primary" id="scan-btn-hero">
+                        <span class="material-icons-outlined">camera_alt</span>
+                        Scan
+                    </button>
+                    <button class="btn btn-secondary" id="import-btn-hero">
+                        <span class="material-icons-outlined">photo_library</span>
+                        Import
+                    </button>
+                </div>
+                <div class="hero-stats" id="hero-stats">
+                    Ready to scan your first document
+                </div>
+
+                <div class="tool-shortcuts">
+                    <button class="tool-chip" data-tool="pdf"><span class="material-icons-outlined">picture_as_pdf</span> PDF</button>
+                    <button class="tool-chip" data-tool="ocr"><span class="material-icons-outlined">spellcheck</span> OCR</button>
+                    <button class="tool-chip" data-tool="qr"><span class="material-icons-outlined">qr_code_scanner</span> QR</button>
+                    <button class="tool-chip" data-tool="vault"><span class="material-icons-outlined">lock</span> Vault</button>
+                </div>
+            </div>
+
+            <div class="filter-row">
+                <button class="filter-chip active" data-filter="all">All</button>
+                <button class="filter-chip" data-filter="favorites">Favorites</button>
+                <button class="filter-chip" data-filter="pinned">Pinned</button>
+                <button class="filter-chip" data-filter="recent">Recent</button>
+            </div>
+
+            <div class="document-section">
+                <div class="section-header">
+                    <h3 id="section-title">Recent files</h3>
+                    <span class="count-label" id="document-count">0 shown</span>
+                </div>
+                <div id="document-list" class="document-list">
+                    <!-- Documents will be injected here -->
+                    <div class="empty-state">
+                        <span class="material-icons-outlined">description</span>
+                        <p>No documents yet</p>
+                        <button class="btn btn-primary" id="empty-scan-btn">Scan now</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Camera/Scan Screen -->
+        <section id="scan-screen" class="screen">
+            <div class="camera-container">
+                <video id="camera-preview" autoplay playsinline></video>
+                <div class="camera-overlay">
+                    <div class="doc-guide"></div>
+                </div>
+                <div class="camera-controls">
+                    <button class="icon-btn btn-large" id="close-camera"><span class="material-icons-outlined">close</span></button>
+                    <button class="shutter-btn" id="take-photo"></button>
+                    <button class="icon-btn btn-large" id="toggle-flash"><span class="material-icons-outlined">flash_off</span></button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Bottom Navigation -->
+        <nav class="bottom-nav">
+            <button class="nav-item active" data-screen="home">
+                <span class="material-icons-outlined">home</span>
+                <span>Home</span>
+            </button>
+            <button class="nav-item" data-screen="files">
+                <span class="material-icons-outlined">folder</span>
+                <span>Files</span>
+            </button>
+            <button class="nav-item" data-screen="tools">
+                <span class="material-icons-outlined">apps</span>
+                <span>Tools</span>
+            </button>
+            <button class="nav-item" data-screen="ai">
+                <span class="material-icons-outlined">auto_awesome</span>
+                <span>AI</span>
+            </button>
+        </nav>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
