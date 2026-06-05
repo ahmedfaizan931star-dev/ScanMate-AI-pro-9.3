@@ -104,55 +104,31 @@
 -dontwarn com.tom_roush.pdfbox.filter.JPXFilter
 
 # ============================================================
-# Apache POI / XMLBeans / DOCX export
+# DOCX export
 # ============================================================
 
-# Keep core POI/XMLBeans classes used for DOCX generation.
--keep class org.apache.poi.** { *; }
--keep class org.openxmlformats.schemas.** { *; }
--keep class com.microsoft.schemas.** { *; }
--keep class org.apache.xmlbeans.** { *; }
-
-# Apache POI references many optional OOXML schema classes.
--dontwarn org.apache.poi.**
--dontwarn org.openxmlformats.schemas.**
--dontwarn com.microsoft.schemas.**
--dontwarn schemaorg_apache_xmlbeans.**
-
-# XMLBeans generated schema internals.
--dontwarn org.apache.xmlbeans.**
--dontwarn org.apache.xmlbeans.impl.schema.**
--dontwarn org.apache.xmlbeans.impl.values.**
-
-# XMLBeans / POI optional StAX references.
--dontwarn javax.xml.stream.**
-
-# Saxon optional XPath backend used by XMLBeans if present.
--dontwarn net.sf.saxon.**
+# DOCX export is now generated with a lightweight ZipOutputStream package writer.
+# Apache POI is intentionally not used at runtime to avoid signed-release R8/runtime crashes.
 
 # ============================================================
-# Java desktop/server APIs referenced by POI optional paths
+# Java desktop/server APIs referenced by optional document-library paths
 # ============================================================
 
-# Java AWT desktop classes referenced by Apache POI optional rendering/debug paths.
+# Java AWT desktop classes referenced by optional rendering/debug paths.
 -dontwarn java.awt.**
 -dontwarn java.awt.color.**
 -dontwarn java.awt.font.**
 -dontwarn java.awt.geom.**
 -dontwarn java.awt.image.**
 
-# W3C DOM optional desktop/XML APIs referenced by POI signing/SVG paths.
+# W3C DOM optional desktop/XML APIs referenced by optional signing/SVG paths.
 -dontwarn org.w3c.dom.events.**
 -dontwarn org.w3c.dom.svg.**
 -dontwarn org.w3c.dom.traversal.**
 
-# Batik optional SVG rendering used by Apache POI slideshow/image code.
+# Batik optional SVG rendering paths.
 -dontwarn org.apache.batik.**
 
-# Extra POI optional digital-signature / XML drawing paths.
--dontwarn org.apache.poi.poifs.crypt.dsig.**
--dontwarn org.apache.poi.xslf.draw.**
--dontwarn org.apache.poi.xslf.usermodel.**
 
 # ============================================================
 # Log4j optional integrations

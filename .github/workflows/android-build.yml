@@ -39,6 +39,9 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x ./gradlew
 
+      - name: Run release candidate sanity checks
+        run: bash scripts/verify_release_candidate.sh
+
       - name: Validate required release signing secrets
         shell: bash
         run: |

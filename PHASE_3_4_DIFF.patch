@@ -1,0 +1,638 @@
+diff -ruN /mnt/data/scanmate_phase12_base/ScanMate-AI-pro-9.3-main/app/src/main/java/com/synthbyte/scanmate/ui/screens/CameraScreen.kt /mnt/data/scanmate_phase34/ScanMate-AI-pro-9.3-main/app/src/main/java/com/synthbyte/scanmate/ui/screens/CameraScreen.kt
+--- /mnt/data/scanmate_phase12_base/ScanMate-AI-pro-9.3-main/app/src/main/java/com/synthbyte/scanmate/ui/screens/CameraScreen.kt	2026-06-04 07:36:16.000000000 +0000
++++ /mnt/data/scanmate_phase34/ScanMate-AI-pro-9.3-main/app/src/main/java/com/synthbyte/scanmate/ui/screens/CameraScreen.kt	2026-06-04 07:58:21.693322172 +0000
+@@ -205,14 +205,14 @@
+                         } else {
+                             photoFile
+                         }
+-                        val finalFile = if (selectedFilter != FilterType.ORIGINAL) {
+-                            withContext(Dispatchers.IO) {
++                        val finalFile = withContext(Dispatchers.IO) {
++                            val filteredFile = if (selectedFilter != FilterType.ORIGINAL) {
+                                 val bitmap = FileUtils.decodeSampledBitmap(qualityFile.absolutePath, 2600, 2600)
+                                 if (bitmap == null) {
+                                     qualityFile
+                                 } else {
+                                     val filtered = FileUtils.applyFilter(bitmap, selectedFilter)
+-                                    FileUtils.saveBitmapToFolder(
++                                    val saved = FileUtils.saveBitmapToFolder(
+                                         context = context,
+                                         bitmap = filtered,
+                                         folderName = "Scans",
+@@ -220,29 +220,27 @@
+                                         format = Bitmap.CompressFormat.JPEG,
+                                         quality = quality.jpegQuality
+                                     ) ?: qualityFile
++                                    if (!bitmap.isRecycled) runCatching { bitmap.recycle() }
++                                    if (!filtered.isRecycled) runCatching { filtered.recycle() }
++                                    saved
+                                 }
++                            } else {
++                                qualityFile
+                             }
+-                        } else {
+-                            qualityFile
+-                        }
+-                        capturedImages.add(finalFile)
+-                        val corners = detectedCorners
+-                        if (corners != null && corners.size == 4) {
+-                            coroutineScope.launch(Dispatchers.IO) {
+-                                val warped = FileUtils.applyPerspectiveCorrection(
+-                                    file = finalFile,
++
++                            val corners = detectedCorners
++                            if (corners != null && corners.size == 4 && currentConfidence >= 0.72f) {
++                                FileUtils.applyPerspectiveCorrection(
++                                    file = filteredFile,
+                                     corners = corners,
+                                     previewWidth = previewView.width.takeIf { it > 0 } ?: 1080,
+                                     previewHeight = previewView.height.takeIf { it > 0 } ?: 1920
+-                                )
+-                                if (warped != null) {
+-                                    withContext(Dispatchers.Main) {
+-                                        val idx = capturedImages.indexOf(finalFile)
+-                                        if (idx >= 0) capturedImages[idx] = warped
+-                                    }
+-                                }
++                                ) ?: filteredFile
++                            } else {
++                                filteredFile
+                             }
+                         }
++                        capturedImages.add(finalFile)
+                         isSaving = false
+                         Toast.makeText(context, "Captured", Toast.LENGTH_SHORT).show()
+                     }
+diff -ruN /mnt/data/scanmate_phase12_base/ScanMate-AI-pro-9.3-main/app/src/main/java/com/synthbyte/scanmate/utils/ImageProcessor.kt /mnt/data/scanmate_phase34/ScanMate-AI-pro-9.3-main/app/src/main/java/com/synthbyte/scanmate/utils/ImageProcessor.kt
+--- /mnt/data/scanmate_phase12_base/ScanMate-AI-pro-9.3-main/app/src/main/java/com/synthbyte/scanmate/utils/ImageProcessor.kt	2026-06-04 07:37:16.000000000 +0000
++++ /mnt/data/scanmate_phase34/ScanMate-AI-pro-9.3-main/app/src/main/java/com/synthbyte/scanmate/utils/ImageProcessor.kt	2026-06-04 07:57:43.501103690 +0000
+@@ -17,6 +17,7 @@
+ import java.io.ByteArrayOutputStream
+ import java.io.File
+ import java.io.FileOutputStream
++import kotlin.math.abs
+ import kotlin.math.max
+ import kotlin.math.min
+ import kotlin.math.roundToInt
+@@ -81,7 +82,7 @@
+         previewHeight: Int
+     ): File? {
+         if (corners.size != 4) return null
+-        val bitmap = decodeSampledBitmap(file.absolutePath, 2600, 2600) ?: return null
++        val bitmap = decodeSampledBitmap(file.absolutePath, 3200, 3200) ?: return null
+         val safePreviewWidth = previewWidth.coerceAtLeast(1)
+         val safePreviewHeight = previewHeight.coerceAtLeast(1)
+         val scaleX = bitmap.width.toFloat() / safePreviewWidth
+@@ -94,33 +95,20 @@
+         }
+ 
+         val ordered = orderDocumentCorners(corners.map(::mappedPoint), bitmap.width, bitmap.height)
+-        val tl = ordered[0]
+-        val tr = ordered[1]
+-        val br = ordered[2]
+-        val bl = ordered[3]
+-        val targetWidth = max(distance(tl, tr), distance(bl, br)).roundToInt().coerceIn(320, bitmap.width.coerceAtLeast(320))
+-        val targetHeight = max(distance(tl, bl), distance(tr, br)).roundToInt().coerceIn(320, bitmap.height.coerceAtLeast(320))
+-
+-        val src = floatArrayOf(tl.x, tl.y, tr.x, tr.y, br.x, br.y, bl.x, bl.y)
+-        val dst = floatArrayOf(0f, 0f, targetWidth.toFloat(), 0f, targetWidth.toFloat(), targetHeight.toFloat(), 0f, targetHeight.toFloat())
+-        val matrix = Matrix()
+-        val mapped = matrix.setPolyToPoly(src, 0, dst, 0, 4)
+-        if (!mapped) {
++        val warped = perspectiveWarp(bitmap, ordered) ?: run {
+             bitmap.recycle()
+             return null
+         }
+-        val warped = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
+-        val canvas = Canvas(warped)
+-        canvas.drawColor(Color.WHITE)
+-        canvas.drawBitmap(bitmap, matrix, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+         bitmap.recycle()
++        val enhanced = cleanDocumentBitmap(warped, preserveColor = true)
++        if (enhanced !== warped && !warped.isRecycled) runCatching { warped.recycle() }
+         val parent = file.parent ?: run {
+-            warped.recycle()
++            enhanced.recycle()
+             return null
+         }
+         val out = File(parent, "warped_${file.name}")
+-        FileOutputStream(out).use { warped.compress(Bitmap.CompressFormat.JPEG, 94, it) }
+-        warped.recycle()
++        FileOutputStream(out).use { enhanced.compress(Bitmap.CompressFormat.JPEG, 95, it) }
++        enhanced.recycle()
+         return out.takeIf { it.exists() && it.length() > 0L }
+     }
+ 
+@@ -156,45 +144,20 @@
+ 
+     fun autoCropDocument(source: Bitmap): Bitmap {
+         if (source.width < 80 || source.height < 80) return source.copy(Bitmap.Config.ARGB_8888, false)
+-        val maxSampleSide = 700
+-        val sampled = source.scaleDownToMax(maxSampleSide) ?: return source.copy(Bitmap.Config.ARGB_8888, false)
+-        val threshold = 235
+-        var minX = sampled.width
+-        var minY = sampled.height
+-        var maxX = 0
+-        var maxY = 0
+-        val step = max(1, sampled.width.coerceAtLeast(sampled.height) / 350)
+-        for (y in 0 until sampled.height step step) {
+-            for (x in 0 until sampled.width step step) {
+-                val color = sampled.getPixel(x, y)
+-                val r = Color.red(color)
+-                val g = Color.green(color)
+-                val b = Color.blue(color)
+-                val brightness = (r + g + b) / 3
+-                val contrast = max(r, max(g, b)) - min(r, min(g, b))
+-                if (brightness < threshold || contrast > 28) {
+-                    minX = min(minX, x)
+-                    minY = min(minY, y)
+-                    maxX = max(maxX, x)
+-                    maxY = max(maxY, y)
+-                }
+-            }
+-        }
+-        if (maxX <= minX || maxY <= minY) return source.copy(Bitmap.Config.ARGB_8888, false)
+-        val marginX = (sampled.width * 0.025f).roundToInt()
+-        val marginY = (sampled.height * 0.025f).roundToInt()
+-        val sx = source.width.toFloat() / sampled.width.toFloat()
+-        val sy = source.height.toFloat() / sampled.height.toFloat()
+-        val left = ((minX - marginX).coerceAtLeast(0) * sx).roundToInt()
+-        val top = ((minY - marginY).coerceAtLeast(0) * sy).roundToInt()
+-        val right = ((maxX + marginX).coerceAtMost(sampled.width - 1) * sx).roundToInt()
+-        val bottom = ((maxY + marginY).coerceAtMost(sampled.height - 1) * sy).roundToInt()
++        val bounds = detectDocumentBounds(source) ?: return source.copy(Bitmap.Config.ARGB_8888, false)
++        val left = bounds.left.roundToInt().coerceIn(0, source.width - 2)
++        val top = bounds.top.roundToInt().coerceIn(0, source.height - 2)
++        val right = bounds.right.roundToInt().coerceIn(left + 1, source.width)
++        val bottom = bounds.bottom.roundToInt().coerceIn(top + 1, source.height)
+         val width = (right - left).coerceAtLeast(64)
+         val height = (bottom - top).coerceAtLeast(64)
+-        if (width < source.width * 0.35f || height < source.height * 0.35f) {
++        if (width < source.width * 0.30f || height < source.height * 0.30f) {
+             return source.copy(Bitmap.Config.ARGB_8888, false)
+         }
+-        return Bitmap.createBitmap(source, left.coerceAtLeast(0), top.coerceAtLeast(0), min(width, source.width - left), min(height, source.height - top))
++        val cropped = Bitmap.createBitmap(source, left, top, min(width, source.width - left), min(height, source.height - top))
++        return cleanDocumentBitmap(cropped, preserveColor = true).also { cleaned ->
++            if (cleaned !== cropped && !cropped.isRecycled) runCatching { cropped.recycle() }
++        }
+     }
+ 
+     fun perspectiveCorrectBitmapNormalized(
+@@ -211,23 +174,222 @@
+         if (source.width < 80 || source.height < 80) return source.copy(Bitmap.Config.ARGB_8888, false)
+         val w = source.width.toFloat()
+         val h = source.height.toFloat()
+-        val src = floatArrayOf(
+-            (topLeftX.coerceIn(0f, 0.45f) * w), (topLeftY.coerceIn(0f, 0.45f) * h),
+-            (w - topRightX.coerceIn(0f, 0.45f) * w), (topRightY.coerceIn(0f, 0.45f) * h),
+-            (w - bottomRightX.coerceIn(0f, 0.45f) * w), (h - bottomRightY.coerceIn(0f, 0.45f) * h),
+-            (bottomLeftX.coerceIn(0f, 0.45f) * w), (h - bottomLeftY.coerceIn(0f, 0.45f) * h)
++        val points = listOf(
++            Offset(topLeftX.coerceIn(0f, 0.45f) * w, topLeftY.coerceIn(0f, 0.45f) * h),
++            Offset(w - topRightX.coerceIn(0f, 0.45f) * w, topRightY.coerceIn(0f, 0.45f) * h),
++            Offset(w - bottomRightX.coerceIn(0f, 0.45f) * w, h - bottomRightY.coerceIn(0f, 0.45f) * h),
++            Offset(bottomLeftX.coerceIn(0f, 0.45f) * w, h - bottomLeftY.coerceIn(0f, 0.45f) * h)
++        )
++        val warped = perspectiveWarp(source, orderDocumentCorners(points, source.width, source.height))
++            ?: return source.copy(Bitmap.Config.ARGB_8888, false)
++        return cleanDocumentBitmap(warped, preserveColor = true).also { cleaned ->
++            if (cleaned !== warped && !warped.isRecycled) runCatching { warped.recycle() }
++        }
++    }
++
++    fun enhanceForOcr(source: Bitmap): Bitmap {
++        val cropped = autoCropDocument(source)
++        val cleaned = cleanDocumentBitmap(cropped, preserveColor = false)
++        if (cleaned !== cropped && !cropped.isRecycled) runCatching { cropped.recycle() }
++        return cleaned
++    }
++
++    private fun perspectiveWarp(source: Bitmap, ordered: List<Offset>): Bitmap? {
++        if (ordered.size != 4) return null
++        val tl = ordered[0]
++        val tr = ordered[1]
++        val br = ordered[2]
++        val bl = ordered[3]
++        val rawWidth = max(distance(tl, tr), distance(bl, br)).roundToInt().coerceAtLeast(320)
++        val rawHeight = max(distance(tl, bl), distance(tr, br)).roundToInt().coerceAtLeast(320)
++        val maxOutputSide = 3400
++        val outputScale = min(1f, maxOutputSide.toFloat() / max(rawWidth, rawHeight).toFloat())
++        val targetWidth = (rawWidth * outputScale).roundToInt().coerceAtLeast(320)
++        val targetHeight = (rawHeight * outputScale).roundToInt().coerceAtLeast(320)
++        val src = floatArrayOf(tl.x, tl.y, tr.x, tr.y, br.x, br.y, bl.x, bl.y)
++        val dst = floatArrayOf(
++            0f, 0f,
++            targetWidth.toFloat(), 0f,
++            targetWidth.toFloat(), targetHeight.toFloat(),
++            0f, targetHeight.toFloat()
+         )
+-        val dst = floatArrayOf(0f, 0f, w, 0f, w, h, 0f, h)
+-        val matrix = android.graphics.Matrix()
+-        if (!matrix.setPolyToPoly(src, 0, dst, 0, 4)) return source.copy(Bitmap.Config.ARGB_8888, false)
+-        val result = Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888)
+-        val canvas = Canvas(result)
+-        canvas.drawColor(Color.WHITE)
+-        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG)
+-        canvas.drawBitmap(source, matrix, paint)
+-        return result
++        val matrix = Matrix()
++        if (!matrix.setPolyToPoly(src, 0, dst, 0, 4)) return null
++        return Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888).also { warped ->
++            val canvas = Canvas(warped)
++            canvas.drawColor(Color.WHITE)
++            canvas.drawBitmap(source, matrix, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG))
++        }
+     }
+ 
++    private fun detectDocumentBounds(source: Bitmap): RectF? {
++        val sampled = source.scaleDownToMax(820) ?: return null
++        val width = sampled.width
++        val height = sampled.height
++        if (width < 80 || height < 80) return null
++        val pixels = IntArray(width * height).also { sampled.getPixels(it, 0, width, 0, 0, width, height) }
++        val luma = IntArray(pixels.size)
++        for (i in pixels.indices) {
++            val px = pixels[i]
++            luma[i] = (Color.red(px) * 0.299f + Color.green(px) * 0.587f + Color.blue(px) * 0.114f).roundToInt()
++        }
++        val border = ArrayList<Int>(width * 2 + height * 2)
++        val step = max(1, max(width, height) / 260)
++        for (x in 0 until width step step) {
++            border += luma[x]
++            border += luma[(height - 1) * width + x]
++        }
++        for (y in 0 until height step step) {
++            border += luma[y * width]
++            border += luma[y * width + width - 1]
++        }
++        val sortedLuma = luma.copyOf().also { it.sort() }
++        val sortedBorder = border.sorted()
++        val background = sortedBorder.percentile(0.50f)
++        val p20 = sortedLuma.percentile(0.20f)
++        val p55 = sortedLuma.percentile(0.55f)
++        val p82 = sortedLuma.percentile(0.82f)
++        val contrastRange = (p82 - p20).coerceAtLeast(1)
++        val brightPageThreshold = max(background + 16, p55 + max(8, contrastRange / 7)).coerceIn(80, 245)
++        val darkContentThreshold = min(background - 20, p20 + 12).coerceIn(20, 210)
++        val rowProjection = IntArray(height)
++        val colProjection = IntArray(width)
++
++        for (y in 1 until height - 1 step step) {
++            val row = y * width
++            for (x in 1 until width - 1 step step) {
++                val index = row + x
++                val lum = luma[index]
++                val gradient = abs(luma[index - 1] - luma[index + 1]) + abs(luma[index - width] - luma[index + width])
++                val likelyBrightPage = lum >= brightPageThreshold && lum > background + 8
++                val likelyDarkPageOrInk = background > 178 && lum <= darkContentThreshold
++                val strongEdge = gradient >= max(22, contrastRange / 5)
++                if (likelyBrightPage || likelyDarkPageOrInk || strongEdge) {
++                    val weight = if (likelyBrightPage) 4 else if (strongEdge) 2 else 1
++                    rowProjection[y] += weight
++                    colProjection[x] += weight
++                }
++            }
++        }
++
++        val horizontal = activeProjectionRange(colProjection, minLength = (width * 0.28f).roundToInt()) ?: return null
++        val vertical = activeProjectionRange(rowProjection, minLength = (height * 0.28f).roundToInt()) ?: return null
++        val marginX = max(4, (width * 0.018f).roundToInt())
++        val marginY = max(4, (height * 0.018f).roundToInt())
++        val sx = source.width.toFloat() / width.toFloat()
++        val sy = source.height.toFloat() / height.toFloat()
++        val left = ((horizontal.first - marginX).coerceAtLeast(0) * sx)
++        val top = ((vertical.first - marginY).coerceAtLeast(0) * sy)
++        val right = ((horizontal.second + marginX).coerceAtMost(width - 1) * sx)
++        val bottom = ((vertical.second + marginY).coerceAtMost(height - 1) * sy)
++        if (sampled !== source && !sampled.isRecycled) runCatching { sampled.recycle() }
++        val boxWidth = right - left
++        val boxHeight = bottom - top
++        val areaRatio = (boxWidth * boxHeight) / (source.width.toFloat() * source.height.toFloat()).coerceAtLeast(1f)
++        return if (areaRatio in 0.10f..0.98f) RectF(left, top, right, bottom) else null
++    }
++
++    private fun activeProjectionRange(values: IntArray, minLength: Int): Pair<Int, Int>? {
++        if (values.isEmpty()) return null
++        val smoothed = IntArray(values.size)
++        for (i in values.indices) {
++            var sum = 0
++            var count = 0
++            for (j in i - 4..i + 4) {
++                if (j in values.indices) {
++                    sum += values[j]
++                    count += 1
++                }
++            }
++            smoothed[i] = if (count == 0) values[i] else sum / count
++        }
++        val peak = smoothed.maxOrNull() ?: return null
++        if (peak <= 0) return null
++        val threshold = max(2, (peak * 0.11f).roundToInt())
++        var bestStart = -1
++        var bestEnd = -1
++        var bestScore = Int.MIN_VALUE
++        var start = -1
++        var gap = 0
++        fun commit(endExclusive: Int) {
++            if (start < 0) return
++            val end = (endExclusive - gap - 1).coerceAtLeast(start)
++            val length = end - start + 1
++            if (length >= minLength) {
++                val score = (start..end).sumOf { smoothed[it] } + length * 6
++                if (score > bestScore) {
++                    bestScore = score
++                    bestStart = start
++                    bestEnd = end
++                }
++            }
++            start = -1
++            gap = 0
++        }
++        for (i in smoothed.indices) {
++            if (smoothed[i] >= threshold) {
++                if (start < 0) start = i
++                gap = 0
++            } else if (start >= 0) {
++                gap += 1
++                if (gap > 8) commit(i + 1)
++            }
++        }
++        commit(smoothed.size)
++        return if (bestStart >= 0 && bestEnd > bestStart) bestStart to bestEnd else null
++    }
++
++    private fun cleanDocumentBitmap(source: Bitmap, preserveColor: Boolean): Bitmap {
++        val width = source.width
++        val height = source.height
++        if (width <= 0 || height <= 0) return source.copy(Bitmap.Config.ARGB_8888, false)
++        val pixels = IntArray(width * height).also { source.getPixels(it, 0, width, 0, 0, width, height) }
++        val lumas = IntArray(pixels.size)
++        for (i in pixels.indices) {
++            val px = pixels[i]
++            lumas[i] = (Color.red(px) * 0.299f + Color.green(px) * 0.587f + Color.blue(px) * 0.114f).roundToInt().coerceIn(0, 255)
++        }
++        val sorted = lumas.copyOf().also { it.sort() }
++        val shadow = sorted.percentile(0.10f).toFloat()
++        val paper = sorted.percentile(0.90f).toFloat().coerceAtLeast(shadow + 35f)
++        val range = (paper - shadow).coerceAtLeast(48f)
++        val output = IntArray(pixels.size)
++        for (i in pixels.indices) {
++            val px = pixels[i]
++            val r = Color.red(px)
++            val g = Color.green(px)
++            val b = Color.blue(px)
++            val lum = lumas[i].toFloat()
++            val normalized = ((lum - shadow) * 255f / range).coerceIn(0f, 255f)
++            val boosted = when {
++                normalized > 225f -> 255f
++                normalized < 45f -> normalized * 0.60f
++                else -> ((normalized - 128f) * 1.16f + 136f).coerceIn(0f, 255f)
++            }
++            output[i] = if (preserveColor) {
++                val factor = (boosted / lum.coerceAtLeast(1f)).coerceIn(0.52f, 1.65f)
++                Color.rgb((r * factor).roundToInt().coerceIn(0, 255), (g * factor).roundToInt().coerceIn(0, 255), (b * factor).roundToInt().coerceIn(0, 255))
++            } else {
++                val value = boosted.roundToInt().coerceIn(0, 255)
++                Color.rgb(value, value, value)
++            }
++        }
++        return Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also { result ->
++            result.setPixels(output, 0, width, 0, 0, width, height)
++        }
++    }
++
++    private fun IntArray.percentile(fraction: Float): Int {
++        if (isEmpty()) return 0
++        val index = ((size - 1) * fraction.coerceIn(0f, 1f)).roundToInt().coerceIn(0, size - 1)
++        return this[index]
++    }
++
++    private fun List<Int>.percentile(fraction: Float): Int {
++        if (isEmpty()) return 0
++        val index = ((size - 1) * fraction.coerceIn(0f, 1f)).roundToInt().coerceIn(0, size - 1)
++        return this[index]
++    }
+ 
+     fun removeMarksFromBitmap(source: Bitmap, sensitivity: Float = 0.18f): Bitmap {
+         val w = source.width
+@@ -316,16 +478,7 @@
+         if (type == FilterType.ORIGINAL) return safe
+         if (type == FilterType.SHARPEN || type == FilterType.SHARP_SCAN) return sharpenBitmap(safe)
+         if (type == FilterType.WHITEBOARD) {
+-            val w = safe.width
+-            val h = safe.height
+-            val pixels = IntArray(w * h).also { safe.getPixels(it, 0, w, 0, 0, w, h) }
+-            val output = pixels.map { px ->
+-                val lum = Color.red(px) * 0.299f + Color.green(px) * 0.587f + Color.blue(px) * 0.114f
+-                val boosted = ((lum - 180f) * 4f).coerceIn(0f, 255f).toInt()
+-                Color.rgb(255 - boosted, 255 - boosted, 255 - boosted)
+-            }.toIntArray()
+-            return Bitmap.createBitmap(w, h, safe.config ?: Bitmap.Config.ARGB_8888).also {
+-                it.setPixels(output, 0, w, 0, 0, w, h)
++            return cleanDocumentBitmap(safe, preserveColor = false).also {
+                 if (!safe.isRecycled) runCatching { safe.recycle() }
+             }
+         }
+diff -ruN /mnt/data/scanmate_phase12_base/ScanMate-AI-pro-9.3-main/app/src/main/java/com/synthbyte/scanmate/utils/OcrHelper.kt /mnt/data/scanmate_phase34/ScanMate-AI-pro-9.3-main/app/src/main/java/com/synthbyte/scanmate/utils/OcrHelper.kt
+--- /mnt/data/scanmate_phase12_base/ScanMate-AI-pro-9.3-main/app/src/main/java/com/synthbyte/scanmate/utils/OcrHelper.kt	2026-06-04 00:08:38.000000000 +0000
++++ /mnt/data/scanmate_phase34/ScanMate-AI-pro-9.3-main/app/src/main/java/com/synthbyte/scanmate/utils/OcrHelper.kt	2026-06-04 07:58:09.981111615 +0000
+@@ -3,6 +3,7 @@
+ import android.content.Context
+ import android.graphics.Bitmap
+ import android.graphics.Canvas
++import android.graphics.Color
+ import android.graphics.ColorMatrix
+ import android.graphics.ColorMatrixColorFilter
+ import android.graphics.Matrix
+@@ -78,11 +79,9 @@
+             ?: return buildStats("OCR failed: Could not decode image", 0)
+         return try {
+             val fixed = fixExifRotation(source, file)
+-            val prepared = preprocessForOcr(fixed)
+             try {
+-                runTextRecognition(prepared, 0)
++                runBestTextRecognition(fixed)
+             } finally {
+-                if (prepared !== fixed && !prepared.isRecycled) runCatching { prepared.recycle() }
+                 if (fixed !== source && !fixed.isRecycled) runCatching { fixed.recycle() }
+                 if (!source.isRecycled) runCatching { source.recycle() }
+             }
+@@ -94,11 +93,9 @@
+ 
+     suspend fun extractStatsFromBitmap(bitmap: Bitmap, rotationDegrees: Int = 0): OcrExtractionResult {
+         val rotated = if (rotationDegrees != 0) rotate(bitmap, rotationDegrees.toFloat()) else bitmap
+-        val prepared = preprocessForOcr(rotated)
+         return try {
+-            runTextRecognition(prepared, 0)
++            runBestTextRecognition(rotated)
+         } finally {
+-            if (prepared !== rotated && !prepared.isRecycled) runCatching { prepared.recycle() }
+             if (rotated !== bitmap && !rotated.isRecycled) runCatching { rotated.recycle() }
+         }
+     }
+@@ -154,36 +151,42 @@
+ 
+     private fun reconstructParagraphs(blocks: List<com.google.mlkit.vision.text.Text.TextBlock>): String {
+         if (blocks.isEmpty()) return ""
+-        val sorted = blocks.sortedWith(compareBy({ it.boundingBox?.top ?: 0 }, { it.boundingBox?.left ?: 0 }))
+-        val paras = mutableListOf<StringBuilder>()
+-        var cur = StringBuilder()
+-        var lastBottom = sorted.first().boundingBox?.bottom ?: 0
+-        sorted.forEach { block ->
+-            val top = block.boundingBox?.top ?: 0
+-            val gap = top - lastBottom
+-            val h = ((block.boundingBox?.bottom ?: 0) - top).coerceAtLeast(1)
+-            if (gap > h * 1.4f && cur.isNotBlank()) {
+-                paras.add(cur)
+-                cur = StringBuilder()
+-            }
+-            block.lines.forEach { line ->
+-                val t = line.text.trim()
+-                if (t.isNotBlank()) {
+-                    if (cur.isNotBlank()) cur.append(" ")
+-                    cur.append(t)
+-                }
++        val lines = blocks
++            .flatMap { block -> block.lines }
++            .mapNotNull { line ->
++                val box = line.boundingBox ?: return@mapNotNull null
++                val clean = line.text.trim().replace(Regex("\\s+"), " ")
++                if (clean.isBlank()) null else OcrLine(box, clean)
+             }
+-            lastBottom = block.boundingBox?.bottom ?: lastBottom
+-        }
+-        if (cur.isNotBlank()) paras.add(cur)
+-        return paras.joinToString("\n\n") { paragraph ->
+-            var t = paragraph.toString().trim()
+-            val lastChar = t.lastOrNull()
+-            if (lastChar != null && lastChar.isLetter() && !t.trimEnd().endsWith(".") && !t.trimEnd().endsWith(",") && t.length > 3) t += "."
+-            t.replace(Regex(" {2,}"), " ").replace(Regex("([a-z])([A-Z])"), "$1 $2")
++            .sortedWith(compareBy<OcrLine> { it.rect.top }.thenBy { it.rect.left })
++        if (lines.isEmpty()) return blocks.joinToString("\n") { it.text }.trim()
++
++        val medianHeight = lines.map { it.rect.height().coerceAtLeast(1) }.sorted().let { values -> values[values.size / 2].coerceAtLeast(1) }
++        val paragraphs = mutableListOf<MutableList<OcrLine>>()
++        var current = mutableListOf<OcrLine>()
++        var lastBottom = lines.first().rect.bottom
++        for (line in lines) {
++            val gap = line.rect.top - lastBottom
++            if (current.isNotEmpty() && gap > medianHeight * 1.35f) {
++                paragraphs += current
++                current = mutableListOf()
++            }
++            current += line
++            lastBottom = max(lastBottom, line.rect.bottom)
+         }
++        if (current.isNotEmpty()) paragraphs += current
++
++        return paragraphs.joinToString("\n\n") { paragraph ->
++            paragraph
++                .sortedWith(compareBy<OcrLine> { it.rect.top }.thenBy { it.rect.left })
++                .joinToString("\n") { it.text }
++                .replace(Regex("[ \t]{2,}"), " ")
++                .trim()
++        }.trim()
+     }
+ 
++    private data class OcrLine(val rect: Rect, val text: String)
++
+     private fun Text.toSortedText(): String {
+         return textBlocks
+             .sortedWith(compareBy<Text.TextBlock> { it.boundingBox?.top ?: Int.MAX_VALUE }.thenBy { it.boundingBox?.left ?: Int.MAX_VALUE })
+@@ -208,20 +211,87 @@
+         return (values.average() * 100.0).roundToInt().coerceIn(0, 100)
+     }
+ 
+-    private fun preprocessForOcr(source: Bitmap): Bitmap {
++    private suspend fun runBestTextRecognition(source: Bitmap): OcrExtractionResult {
++        val candidates = buildOcrCandidates(source)
++        if (candidates.isEmpty()) return buildStats("", 0)
++        var best: OcrExtractionResult? = null
++        try {
++            for ((_, bitmap) in candidates) {
++                val result = runTextRecognition(bitmap, 0)
++                if (best == null || ocrQualityScore(result) > ocrQualityScore(best!!)) {
++                    best = result
++                }
++            }
++        } finally {
++            candidates.forEach { (_, bitmap) ->
++                if (bitmap !== source && !bitmap.isRecycled) runCatching { bitmap.recycle() }
++            }
++        }
++        return best ?: buildStats("", 0)
++    }
++
++    private fun buildOcrCandidates(source: Bitmap): List<Pair<String, Bitmap>> {
++        val result = mutableListOf<Pair<String, Bitmap>>()
+         val deskewed = estimateSkewAndRotate(source)
+         val scaled = deskewed.scaleDownToMax(OCR_MAX_SIDE)
+-        val gray = Bitmap.createBitmap(scaled.width, scaled.height, Bitmap.Config.ARGB_8888)
++        val base = scaled.copy(Bitmap.Config.ARGB_8888, false)
++        result += "deskewed" to base
++        runCatching { ImageProcessor.enhanceForOcr(base) }.getOrNull()?.let { result += "document-clean" to it }
++        val gray = toGrayscaleBitmap(base)
++        result += "grayscale" to gray
++        runCatching { adaptiveBinarizeBitmap(gray) }.getOrNull()?.let { result += "adaptive-bw" to it }
++        runCatching { FileUtils.applyFilter(gray, FilterType.HIGH_CONTRAST) }.getOrNull()?.let { result += "high-contrast" to it }
++        if (scaled !== source && scaled !== deskewed && !scaled.isRecycled) runCatching { scaled.recycle() }
++        if (deskewed !== source && deskewed !== scaled && !deskewed.isRecycled) runCatching { deskewed.recycle() }
++        return result.distinctBy { (_, bitmap) -> System.identityHashCode(bitmap) }
++    }
++
++    private fun ocrQualityScore(result: OcrExtractionResult): Double {
++        if (result.text.isBlank() || result.text.startsWith("OCR failed", ignoreCase = true)) return Double.NEGATIVE_INFINITY
++        val textLengthScore = min(result.text.length, 1600) / 1600.0 * 18.0
++        val wordScore = min(result.wordCount, 240) * 0.32
++        val confidenceScore = result.confidencePercent * 1.25
++        val structureBonus = result.text.count { it == '\n' }.coerceAtMost(18) * 0.55
++        return confidenceScore + wordScore + textLengthScore + structureBonus
++    }
++
++    private fun toGrayscaleBitmap(source: Bitmap): Bitmap {
++        val gray = Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888)
+         val canvas = Canvas(gray)
+         val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
+             colorFilter = ColorMatrixColorFilter(ColorMatrix().apply { setSaturation(0f) })
+         }
+-        canvas.drawBitmap(scaled, 0f, 0f, paint)
+-        if (scaled !== deskewed && !scaled.isRecycled) runCatching { scaled.recycle() }
+-        if (deskewed !== source && deskewed !== scaled && !deskewed.isRecycled) runCatching { deskewed.recycle() }
+-        val highContrast = FileUtils.applyFilter(gray, FilterType.HIGH_CONTRAST)
+-        if (!gray.isRecycled) runCatching { gray.recycle() }
+-        return highContrast
++        canvas.drawBitmap(source, 0f, 0f, paint)
++        return gray
++    }
++
++    private fun adaptiveBinarizeBitmap(source: Bitmap): Bitmap {
++        val width = source.width
++        val height = source.height
++        val pixels = IntArray(width * height).also { source.getPixels(it, 0, width, 0, 0, width, height) }
++        val lumas = IntArray(pixels.size)
++        for (i in pixels.indices) {
++            val px = pixels[i]
++            lumas[i] = (Color.red(px) * 0.299f + Color.green(px) * 0.587f + Color.blue(px) * 0.114f).roundToInt().coerceIn(0, 255)
++        }
++        val sorted = lumas.copyOf().also { it.sort() }
++        val low = sorted.percentile(0.18f)
++        val high = sorted.percentile(0.86f).coerceAtLeast(low + 30)
++        val threshold = ((low * 0.42f + high * 0.58f) - 6f).roundToInt().coerceIn(70, 218)
++        val output = IntArray(pixels.size)
++        for (i in lumas.indices) {
++            val value = if (lumas[i] < threshold) 0 else 255
++            output[i] = Color.rgb(value, value, value)
++        }
++        return Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also {
++            it.setPixels(output, 0, width, 0, 0, width, height)
++        }
++    }
++
++    private fun IntArray.percentile(fraction: Float): Int {
++        if (isEmpty()) return 0
++        val index = ((size - 1) * fraction.coerceIn(0f, 1f)).roundToInt().coerceIn(0, size - 1)
++        return this[index]
+     }
+ 
+     private fun estimateSkewAndRotate(source: Bitmap): Bitmap {

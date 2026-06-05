@@ -164,10 +164,18 @@ fun CameraScreen(
     var cameraError by remember { mutableStateOf<String?>(null) }
     var autoDetectEnabled by remember { mutableStateOf(true) }
     var stableFrameCount by remember { mutableIntStateOf(0) }
+    var lastAutoCaptureAt by remember { mutableStateOf(0L) }
     var detectedCorners by remember { mutableStateOf<List<Offset>?>(null) }
     var currentConfidence by remember { mutableStateOf(0f) }
-    val isLocked = currentConfidence >= 0.75f
+    val isLocked = currentConfidence >= 0.82f
     var selectedFilter by remember { mutableStateOf(FilterType.ORIGINAL) }
+    val scannerHint = when {
+        !autoDetectEnabled -> "Auto edge detection is off"
+        detectedCorners == null -> "Place document inside the frame"
+        currentConfidence >= 0.86f -> "Document locked · hold steady"
+        currentConfidence >= 0.72f -> "Almost ready · hold steady"
+        else -> "Move closer or improve lighting"
+    }
 
     fun finishDocument() {
         if (capturedImages.isEmpty()) {
@@ -205,14 +213,14 @@ fun CameraScreen(
                         } else {
                             photoFile
                         }
-                        val finalFile = if (selectedFilter != FilterType.ORIGINAL) {
-                            withContext(Dispatchers.IO) {
+                        val finalFile = withContext(Dispatchers.IO) {
+                            val filteredFile = if (selectedFilter != FilterType.ORIGINAL) {
                                 val bitmap = FileUtils.decodeSampledBitmap(qualityFile.absolutePath, 2600, 2600)
                                 if (bitmap == null) {
                                     qualityFile
                                 } else {
                                     val filtered = FileUtils.applyFilter(bitmap, selectedFilter)
-                                    FileUtils.saveBitmapToFolder(
+                                    val saved = FileUtils.saveBitmapToFolder(
                                         context = context,
                                         bitmap = filtered,
                                         folderName = "Scans",
@@ -220,29 +228,27 @@ fun CameraScreen(
                                         format = Bitmap.CompressFormat.JPEG,
                                         quality = quality.jpegQuality
                                     ) ?: qualityFile
+                                    if (!bitmap.isRecycled) runCatching { bitmap.recycle() }
+                                    if (!filtered.isRecycled) runCatching { filtered.recycle() }
+                                    saved
                                 }
+                            } else {
+                                qualityFile
                             }
-                        } else {
-                            qualityFile
-                        }
-                        capturedImages.add(finalFile)
-                        val corners = detectedCorners
-                        if (corners != null && corners.size == 4) {
-                            coroutineScope.launch(Dispatchers.IO) {
-                                val warped = FileUtils.applyPerspectiveCorrection(
-                                    file = finalFile,
+
+                            val corners = detectedCorners
+                            if (corners != null && corners.size == 4 && currentConfidence >= 0.72f) {
+                                FileUtils.applyPerspectiveCorrection(
+                                    file = filteredFile,
                                     corners = corners,
                                     previewWidth = previewView.width.takeIf { it > 0 } ?: 1080,
                                     previewHeight = previewView.height.takeIf { it > 0 } ?: 1920
-                                )
-                                if (warped != null) {
-                                    withContext(Dispatchers.Main) {
-                                        val idx = capturedImages.indexOf(finalFile)
-                                        if (idx >= 0) capturedImages[idx] = warped
-                                    }
-                                }
+                                ) ?: filteredFile
+                            } else {
+                                filteredFile
                             }
                         }
+                        capturedImages.add(finalFile)
                         isSaving = false
                         Toast.makeText(context, "Captured", Toast.LENGTH_SHORT).show()
                     }
@@ -334,7 +340,7 @@ fun CameraScreen(
                                     return@setAnalyzer
                                 }
                                 val now = System.currentTimeMillis()
-                                if (now - lastAnalyzedAt < 180L) return@setAnalyzer
+                                if (now - lastAnalyzedAt < 140L) return@setAnalyzer
                                 lastAnalyzedAt = now
                                 val result = EdgeAnalyzer.detect(imageProxy)
                                 mainHandler.post {
@@ -345,13 +351,20 @@ fun CameraScreen(
                                     } else {
                                         detectedCorners = result.corners
                                         currentConfidence = result.confidence
-                                        if (result.confidence > 0.62f && autoDetectEnabled && !isSaving && !isFinishing) {
+                                        val nowMain = System.currentTimeMillis()
+                                        val autoCaptureReady = result.confidence >= 0.84f &&
+                                            autoDetectEnabled &&
+                                            !isSaving &&
+                                            !isFinishing &&
+                                            nowMain - lastAutoCaptureAt > 2200L
+                                        if (autoCaptureReady) {
                                             stableFrameCount += 1
-                                            if (stableFrameCount >= 10) {
+                                            if (stableFrameCount >= 7) {
                                                 stableFrameCount = 0
+                                                lastAutoCaptureAt = nowMain
                                                 takePicture()
                                             }
-                                        } else {
+                                        } else if (result.confidence < 0.72f || isSaving || isFinishing) {
                                             stableFrameCount = 0
                                         }
                                     }
@@ -384,18 +397,22 @@ fun CameraScreen(
         DocumentOverlay(corners = detectedCorners, confidence = currentConfidence)
 
         AnimatedVisibility(
-            visible = isLocked,
+            visible = autoDetectEnabled,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(bottom = 154.dp)
         ) {
             Text(
-                text = "Document ready · Tap to capture",
+                text = scannerHint,
                 color = Color.White,
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier
-                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.88f), RoundedCornerShape(50))
+                    .background(
+                        if (isLocked) MaterialTheme.colorScheme.primary.copy(alpha = 0.88f)
+                        else Color.Black.copy(alpha = 0.58f),
+                        RoundedCornerShape(50)
+                    )
                     .padding(horizontal = 16.dp, vertical = 8.dp)
             )
         }

@@ -3,6 +3,7 @@ package com.synthbyte.scanmate.utils
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.Matrix
@@ -78,11 +79,9 @@ object OcrHelper {
             ?: return buildStats("OCR failed: Could not decode image", 0)
         return try {
             val fixed = fixExifRotation(source, file)
-            val prepared = preprocessForOcr(fixed)
             try {
-                runTextRecognition(prepared, 0)
+                runBestTextRecognition(fixed)
             } finally {
-                if (prepared !== fixed && !prepared.isRecycled) runCatching { prepared.recycle() }
                 if (fixed !== source && !fixed.isRecycled) runCatching { fixed.recycle() }
                 if (!source.isRecycled) runCatching { source.recycle() }
             }
@@ -94,11 +93,9 @@ object OcrHelper {
 
     suspend fun extractStatsFromBitmap(bitmap: Bitmap, rotationDegrees: Int = 0): OcrExtractionResult {
         val rotated = if (rotationDegrees != 0) rotate(bitmap, rotationDegrees.toFloat()) else bitmap
-        val prepared = preprocessForOcr(rotated)
         return try {
-            runTextRecognition(prepared, 0)
+            runBestTextRecognition(rotated)
         } finally {
-            if (prepared !== rotated && !prepared.isRecycled) runCatching { prepared.recycle() }
             if (rotated !== bitmap && !rotated.isRecycled) runCatching { rotated.recycle() }
         }
     }
@@ -154,35 +151,41 @@ object OcrHelper {
 
     private fun reconstructParagraphs(blocks: List<com.google.mlkit.vision.text.Text.TextBlock>): String {
         if (blocks.isEmpty()) return ""
-        val sorted = blocks.sortedWith(compareBy({ it.boundingBox?.top ?: 0 }, { it.boundingBox?.left ?: 0 }))
-        val paras = mutableListOf<StringBuilder>()
-        var cur = StringBuilder()
-        var lastBottom = sorted.first().boundingBox?.bottom ?: 0
-        sorted.forEach { block ->
-            val top = block.boundingBox?.top ?: 0
-            val gap = top - lastBottom
-            val h = ((block.boundingBox?.bottom ?: 0) - top).coerceAtLeast(1)
-            if (gap > h * 1.4f && cur.isNotBlank()) {
-                paras.add(cur)
-                cur = StringBuilder()
+        val lines = blocks
+            .flatMap { block -> block.lines }
+            .mapNotNull { line ->
+                val box = line.boundingBox ?: return@mapNotNull null
+                val clean = line.text.trim().replace(Regex("\\s+"), " ")
+                if (clean.isBlank()) null else OcrLine(box, clean)
             }
-            block.lines.forEach { line ->
-                val t = line.text.trim()
-                if (t.isNotBlank()) {
-                    if (cur.isNotBlank()) cur.append(" ")
-                    cur.append(t)
-                }
+            .sortedWith(compareBy<OcrLine> { it.rect.top }.thenBy { it.rect.left })
+        if (lines.isEmpty()) return blocks.joinToString("\n") { it.text }.trim()
+
+        val medianHeight = lines.map { it.rect.height().coerceAtLeast(1) }.sorted().let { values -> values[values.size / 2].coerceAtLeast(1) }
+        val paragraphs = mutableListOf<MutableList<OcrLine>>()
+        var current = mutableListOf<OcrLine>()
+        var lastBottom = lines.first().rect.bottom
+        for (line in lines) {
+            val gap = line.rect.top - lastBottom
+            if (current.isNotEmpty() && gap > medianHeight * 1.35f) {
+                paragraphs += current
+                current = mutableListOf()
             }
-            lastBottom = block.boundingBox?.bottom ?: lastBottom
+            current += line
+            lastBottom = max(lastBottom, line.rect.bottom)
         }
-        if (cur.isNotBlank()) paras.add(cur)
-        return paras.joinToString("\n\n") { paragraph ->
-            var t = paragraph.toString().trim()
-            val lastChar = t.lastOrNull()
-            if (lastChar != null && lastChar.isLetter() && !t.trimEnd().endsWith(".") && !t.trimEnd().endsWith(",") && t.length > 3) t += "."
-            t.replace(Regex(" {2,}"), " ").replace(Regex("([a-z])([A-Z])"), "$1 $2")
-        }
+        if (current.isNotEmpty()) paragraphs += current
+
+        return paragraphs.joinToString("\n\n") { paragraph ->
+            paragraph
+                .sortedWith(compareBy<OcrLine> { it.rect.top }.thenBy { it.rect.left })
+                .joinToString("\n") { it.text }
+                .replace(Regex("[ \t]{2,}"), " ")
+                .trim()
+        }.trim()
     }
+
+    private data class OcrLine(val rect: Rect, val text: String)
 
     private fun Text.toSortedText(): String {
         return textBlocks
@@ -208,20 +211,93 @@ object OcrHelper {
         return (values.average() * 100.0).roundToInt().coerceIn(0, 100)
     }
 
+    private suspend fun runBestTextRecognition(source: Bitmap): OcrExtractionResult {
+        val candidates = buildOcrCandidates(source)
+        if (candidates.isEmpty()) return buildStats("", 0)
+        var best: OcrExtractionResult? = null
+        try {
+            for ((_, bitmap) in candidates) {
+                val result = runTextRecognition(bitmap, 0)
+                if (best == null || ocrQualityScore(result) > ocrQualityScore(best!!)) {
+                    best = result
+                }
+            }
+        } finally {
+            candidates.forEach { (_, bitmap) ->
+                if (bitmap !== source && !bitmap.isRecycled) runCatching { bitmap.recycle() }
+            }
+        }
+        return best ?: buildStats("", 0)
+    }
+
+    @Suppress("unused")
     private fun preprocessForOcr(source: Bitmap): Bitmap {
+        return runCatching { ImageProcessor.enhanceForOcr(source) }
+            .getOrElse { source.copy(Bitmap.Config.ARGB_8888, false) }
+    }
+
+    private fun buildOcrCandidates(source: Bitmap): List<Pair<String, Bitmap>> {
+        val result = mutableListOf<Pair<String, Bitmap>>()
         val deskewed = estimateSkewAndRotate(source)
         val scaled = deskewed.scaleDownToMax(OCR_MAX_SIDE)
-        val gray = Bitmap.createBitmap(scaled.width, scaled.height, Bitmap.Config.ARGB_8888)
+        val base = scaled.copy(Bitmap.Config.ARGB_8888, false)
+        result += "deskewed" to base
+        runCatching { ImageProcessor.enhanceForOcr(base) }.getOrNull()?.let { result += "document-clean" to it }
+        val gray = toGrayscaleBitmap(base)
+        result += "grayscale" to gray
+        runCatching { adaptiveBinarizeBitmap(gray) }.getOrNull()?.let { result += "adaptive-bw" to it }
+        runCatching { FileUtils.applyFilter(gray, FilterType.HIGH_CONTRAST) }.getOrNull()?.let { result += "high-contrast" to it }
+        if (scaled !== source && scaled !== deskewed && !scaled.isRecycled) runCatching { scaled.recycle() }
+        if (deskewed !== source && deskewed !== scaled && !deskewed.isRecycled) runCatching { deskewed.recycle() }
+        return result.distinctBy { (_, bitmap) -> System.identityHashCode(bitmap) }
+    }
+
+    private fun ocrQualityScore(result: OcrExtractionResult): Double {
+        if (result.text.isBlank() || result.text.startsWith("OCR failed", ignoreCase = true)) return Double.NEGATIVE_INFINITY
+        val textLengthScore = min(result.text.length, 1600) / 1600.0 * 18.0
+        val wordScore = min(result.wordCount, 240) * 0.32
+        val confidenceScore = result.confidencePercent * 1.25
+        val structureBonus = result.text.count { it == '\n' }.coerceAtMost(18) * 0.55
+        return confidenceScore + wordScore + textLengthScore + structureBonus
+    }
+
+    private fun toGrayscaleBitmap(source: Bitmap): Bitmap {
+        val gray = Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(gray)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
             colorFilter = ColorMatrixColorFilter(ColorMatrix().apply { setSaturation(0f) })
         }
-        canvas.drawBitmap(scaled, 0f, 0f, paint)
-        if (scaled !== deskewed && !scaled.isRecycled) runCatching { scaled.recycle() }
-        if (deskewed !== source && deskewed !== scaled && !deskewed.isRecycled) runCatching { deskewed.recycle() }
-        val highContrast = FileUtils.applyFilter(gray, FilterType.HIGH_CONTRAST)
-        if (!gray.isRecycled) runCatching { gray.recycle() }
-        return highContrast
+        canvas.drawBitmap(source, 0f, 0f, paint)
+        return gray
+    }
+
+    private fun adaptiveBinarizeBitmap(source: Bitmap): Bitmap {
+        val width = source.width
+        val height = source.height
+        val pixels = IntArray(width * height).also { source.getPixels(it, 0, width, 0, 0, width, height) }
+        val lumas = IntArray(pixels.size)
+        for (i in pixels.indices) {
+            val px = pixels[i]
+            lumas[i] = (Color.red(px) * 0.299f + Color.green(px) * 0.587f + Color.blue(px) * 0.114f).roundToInt().coerceIn(0, 255)
+        }
+        val sorted = lumas.copyOf().also { it.sort() }
+        val low = sorted.percentile(0.18f)
+        val high = sorted.percentile(0.86f).coerceAtLeast(low + 30)
+        val threshold = ((low * 0.42f + high * 0.58f) - 6f).roundToInt().coerceIn(70, 218)
+        val output = IntArray(pixels.size)
+        for (i in lumas.indices) {
+            val value = if (lumas[i] < threshold) 0 else 255
+            output[i] = Color.rgb(value, value, value)
+        }
+        return Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also {
+            it.setPixels(output, 0, width, 0, 0, width, height)
+        }
+    }
+
+    private fun IntArray.percentile(fraction: Float): Int {
+        if (isEmpty()) return 0
+        val index = ((size - 1) * fraction.coerceIn(0f, 1f)).roundToInt().coerceIn(0, size - 1)
+        return this[index]
     }
 
     private fun estimateSkewAndRotate(source: Bitmap): Bitmap {

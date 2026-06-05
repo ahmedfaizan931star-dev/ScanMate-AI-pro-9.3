@@ -1,0 +1,13 @@
+ScanMate AI Pro Phase 5–8 verification
+
+Local sandbox checks:
+- Release candidate sanity script: PASS
+- Kotlin package count/bracket balance check: PASS
+- Production Apache POI/XWPF references: NONE FOUND
+- New DOCX exporter regression tests added: YES
+- New POI runtime regression test added: YES
+- GitHub Actions static sanity step added: YES
+
+Full Gradle build:
+- NOT RUN in sandbox because services.gradle.org is not reachable from this environment.
+- Must be verified by GitHub Actions after push.

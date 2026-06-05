@@ -1,0 +1,202 @@
+diff -ruN '--exclude=PHASE_5_8_DIFF.patch' '--exclude=PHASE_5_8_FINAL_STABILITY_REPORT.md' '--exclude=PHASE_5_8_VERIFY.log' /mnt/data/scanmate_phase34_base/ScanMate-AI-pro-9.3-main/.github/workflows/android-build.yml ./.github/workflows/android-build.yml
+--- /mnt/data/scanmate_phase34_base/ScanMate-AI-pro-9.3-main/.github/workflows/android-build.yml	2026-06-04 00:08:38.000000000 +0000
++++ ./.github/workflows/android-build.yml	2026-06-04 12:30:29.531545868 +0000
+@@ -39,6 +39,9 @@
+       - name: Make gradlew executable
+         run: chmod +x ./gradlew
+ 
++      - name: Run release candidate sanity checks
++        run: bash scripts/verify_release_candidate.sh
++
+       - name: Validate required release signing secrets
+         shell: bash
+         run: |
+diff -ruN '--exclude=PHASE_5_8_DIFF.patch' '--exclude=PHASE_5_8_FINAL_STABILITY_REPORT.md' '--exclude=PHASE_5_8_VERIFY.log' /mnt/data/scanmate_phase34_base/ScanMate-AI-pro-9.3-main/app/src/main/java/com/synthbyte/scanmate/ui/screens/CameraScreen.kt ./app/src/main/java/com/synthbyte/scanmate/ui/screens/CameraScreen.kt
+--- /mnt/data/scanmate_phase34_base/ScanMate-AI-pro-9.3-main/app/src/main/java/com/synthbyte/scanmate/ui/screens/CameraScreen.kt	2026-06-04 07:58:21.000000000 +0000
++++ ./app/src/main/java/com/synthbyte/scanmate/ui/screens/CameraScreen.kt	2026-06-04 12:30:06.244476869 +0000
+@@ -164,10 +164,18 @@
+     var cameraError by remember { mutableStateOf<String?>(null) }
+     var autoDetectEnabled by remember { mutableStateOf(true) }
+     var stableFrameCount by remember { mutableIntStateOf(0) }
++    var lastAutoCaptureAt by remember { mutableStateOf(0L) }
+     var detectedCorners by remember { mutableStateOf<List<Offset>?>(null) }
+     var currentConfidence by remember { mutableStateOf(0f) }
+     val isLocked = currentConfidence >= 0.82f
+     var selectedFilter by remember { mutableStateOf(FilterType.ORIGINAL) }
++    val scannerHint = when {
++        !autoDetectEnabled -> "Auto edge detection is off"
++        detectedCorners == null -> "Place document inside the frame"
++        currentConfidence >= 0.86f -> "Document locked · hold steady"
++        currentConfidence >= 0.72f -> "Almost ready · hold steady"
++        else -> "Move closer or improve lighting"
++    }
+ 
+     fun finishDocument() {
+         if (capturedImages.isEmpty()) {
+@@ -343,13 +351,20 @@
+                                     } else {
+                                         detectedCorners = result.corners
+                                         currentConfidence = result.confidence
+-                                        if (result.confidence >= 0.82f && autoDetectEnabled && !isSaving && !isFinishing) {
++                                        val nowMain = System.currentTimeMillis()
++                                        val autoCaptureReady = result.confidence >= 0.84f &&
++                                            autoDetectEnabled &&
++                                            !isSaving &&
++                                            !isFinishing &&
++                                            nowMain - lastAutoCaptureAt > 2200L
++                                        if (autoCaptureReady) {
+                                             stableFrameCount += 1
+-                                            if (stableFrameCount >= 6) {
++                                            if (stableFrameCount >= 7) {
+                                                 stableFrameCount = 0
++                                                lastAutoCaptureAt = nowMain
+                                                 takePicture()
+                                             }
+-                                        } else {
++                                        } else if (result.confidence < 0.72f || isSaving || isFinishing) {
+                                             stableFrameCount = 0
+                                         }
+                                     }
+@@ -382,18 +397,22 @@
+         DocumentOverlay(corners = detectedCorners, confidence = currentConfidence)
+ 
+         AnimatedVisibility(
+-            visible = isLocked,
++            visible = autoDetectEnabled,
+             modifier = Modifier
+                 .align(Alignment.BottomCenter)
+                 .padding(bottom = 154.dp)
+         ) {
+             Text(
+-                text = "Document ready · Tap to capture",
++                text = scannerHint,
+                 color = Color.White,
+                 style = MaterialTheme.typography.labelLarge,
+                 fontWeight = FontWeight.Bold,
+                 modifier = Modifier
+-                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.88f), RoundedCornerShape(50))
++                    .background(
++                        if (isLocked) MaterialTheme.colorScheme.primary.copy(alpha = 0.88f)
++                        else Color.Black.copy(alpha = 0.58f),
++                        RoundedCornerShape(50)
++                    )
+                     .padding(horizontal = 16.dp, vertical = 8.dp)
+             )
+         }
+diff -ruN '--exclude=PHASE_5_8_DIFF.patch' '--exclude=PHASE_5_8_FINAL_STABILITY_REPORT.md' '--exclude=PHASE_5_8_VERIFY.log' /mnt/data/scanmate_phase34_base/ScanMate-AI-pro-9.3-main/app/src/main/java/com/synthbyte/scanmate/utils/OcrHelper.kt ./app/src/main/java/com/synthbyte/scanmate/utils/OcrHelper.kt
+--- /mnt/data/scanmate_phase34_base/ScanMate-AI-pro-9.3-main/app/src/main/java/com/synthbyte/scanmate/utils/OcrHelper.kt	2026-06-04 07:58:09.000000000 +0000
++++ ./app/src/main/java/com/synthbyte/scanmate/utils/OcrHelper.kt	2026-06-04 12:30:06.245067179 +0000
+@@ -230,6 +230,12 @@
+         return best ?: buildStats("", 0)
+     }
+ 
++    @Suppress("unused")
++    private fun preprocessForOcr(source: Bitmap): Bitmap {
++        return runCatching { ImageProcessor.enhanceForOcr(source) }
++            .getOrElse { source.copy(Bitmap.Config.ARGB_8888, false) }
++    }
++
+     private fun buildOcrCandidates(source: Bitmap): List<Pair<String, Bitmap>> {
+         val result = mutableListOf<Pair<String, Bitmap>>()
+         val deskewed = estimateSkewAndRotate(source)
+diff -ruN '--exclude=PHASE_5_8_DIFF.patch' '--exclude=PHASE_5_8_FINAL_STABILITY_REPORT.md' '--exclude=PHASE_5_8_VERIFY.log' /mnt/data/scanmate_phase34_base/ScanMate-AI-pro-9.3-main/app/src/test/java/com/synthbyte/scanmate/DocxExporterTest.kt ./app/src/test/java/com/synthbyte/scanmate/DocxExporterTest.kt
+--- /mnt/data/scanmate_phase34_base/ScanMate-AI-pro-9.3-main/app/src/test/java/com/synthbyte/scanmate/DocxExporterTest.kt	1970-01-01 00:00:00.000000000 +0000
++++ ./app/src/test/java/com/synthbyte/scanmate/DocxExporterTest.kt	2026-06-04 12:30:22.196607142 +0000
+@@ -0,0 +1,35 @@
++package com.synthbyte.scanmate
++
++import com.synthbyte.scanmate.utils.DocxExporter
++import org.junit.Assert.assertFalse
++import org.junit.Assert.assertNotNull
++import org.junit.Assert.assertTrue
++import org.junit.Test
++import java.io.File
++import java.util.zip.ZipFile
++
++class DocxExporterTest {
++    @Test
++    fun exportDocxCreatesValidOfficePackageWithoutPoiRuntime() {
++        val file = File.createTempFile("scanmate_docx_test_", ".docx")
++        file.deleteOnExit()
++
++        DocxExporter.exportDocx("Hello & <ScanMate>\nSecond line", file)
++
++        assertTrue(file.exists())
++        assertTrue(file.length() > 500L)
++        ZipFile(file).use { zip ->
++            assertNotNull(zip.getEntry("[Content_Types].xml"))
++            assertNotNull(zip.getEntry("_rels/.rels"))
++            assertNotNull(zip.getEntry("word/document.xml"))
++            assertNotNull(zip.getEntry("word/styles.xml"))
++            assertNotNull(zip.getEntry("word/settings.xml"))
++            val documentXml = zip.getInputStream(zip.getEntry("word/document.xml"))
++                .bufferedReader()
++                .use { it.readText() }
++            assertTrue(documentXml.contains("Hello &amp; &lt;ScanMate&gt;"))
++            assertTrue(documentXml.contains("Second line"))
++            assertFalse(documentXml.contains("<ScanMate>"))
++        }
++    }
++}
+diff -ruN '--exclude=PHASE_5_8_DIFF.patch' '--exclude=PHASE_5_8_FINAL_STABILITY_REPORT.md' '--exclude=PHASE_5_8_VERIFY.log' /mnt/data/scanmate_phase34_base/ScanMate-AI-pro-9.3-main/app/src/test/java/com/synthbyte/scanmate/ReleaseRuntimeGuardTest.kt ./app/src/test/java/com/synthbyte/scanmate/ReleaseRuntimeGuardTest.kt
+--- /mnt/data/scanmate_phase34_base/ScanMate-AI-pro-9.3-main/app/src/test/java/com/synthbyte/scanmate/ReleaseRuntimeGuardTest.kt	1970-01-01 00:00:00.000000000 +0000
++++ ./app/src/test/java/com/synthbyte/scanmate/ReleaseRuntimeGuardTest.kt	2026-06-04 12:30:22.210346651 +0000
+@@ -0,0 +1,18 @@
++package com.synthbyte.scanmate
++
++import org.junit.Assert.assertTrue
++import org.junit.Test
++
++class ReleaseRuntimeGuardTest {
++    @Test
++    fun apachePoiXwpfRuntimeIsNotPackaged() {
++        val missing = runCatching {
++            Class.forName("org.apache.poi.xwpf.usermodel.XWPFDocument")
++        }.exceptionOrNull() is ClassNotFoundException
++
++        assertTrue(
++            "DOCX export must not depend on Apache POI/XWPF at runtime because it caused signed APK crashes.",
++            missing
++        )
++    }
++}
+diff -ruN '--exclude=PHASE_5_8_DIFF.patch' '--exclude=PHASE_5_8_FINAL_STABILITY_REPORT.md' '--exclude=PHASE_5_8_VERIFY.log' /mnt/data/scanmate_phase34_base/ScanMate-AI-pro-9.3-main/scripts/verify_release_candidate.sh ./scripts/verify_release_candidate.sh
+--- /mnt/data/scanmate_phase34_base/ScanMate-AI-pro-9.3-main/scripts/verify_release_candidate.sh	1970-01-01 00:00:00.000000000 +0000
++++ ./scripts/verify_release_candidate.sh	2026-06-04 12:30:22.239710677 +0000
+@@ -0,0 +1,36 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
++cd "$ROOT_DIR"
++
++fail() {
++  echo "::error::$1" >&2
++  exit 1
++}
++
++require_file() {
++  [[ -f "$1" ]] || fail "Missing required file: $1"
++}
++
++require_file app/src/main/java/com/synthbyte/scanmate/utils/DocxExporter.kt
++require_file app/src/main/java/com/synthbyte/scanmate/util/EdgeAnalyzer.kt
++require_file app/src/main/java/com/synthbyte/scanmate/utils/ImageProcessor.kt
++require_file app/src/main/java/com/synthbyte/scanmate/utils/OcrHelper.kt
++require_file app/proguard-rules.pro
++require_file .github/workflows/android-build.yml
++
++if grep -R -nE 'XWPFDocument|poi-ooxml|org\.apache\.poi' \
++  app/src/main app/build.gradle.kts gradle/libs.versions.toml >/tmp/scanmate_poi_refs.txt 2>/dev/null; then
++  cat /tmp/scanmate_poi_refs.txt >&2
++  fail "Apache POI/XWPF runtime references found in production code or Gradle config."
++fi
++
++grep -q 'ZipOutputStream' app/src/main/java/com/synthbyte/scanmate/utils/DocxExporter.kt || fail "DOCX exporter is not using ZipOutputStream."
++grep -q 'word/document.xml' app/src/main/java/com/synthbyte/scanmate/utils/DocxExporter.kt || fail "DOCX package writer is missing word/document.xml."
++grep -q 'sampleLuma' app/src/main/java/com/synthbyte/scanmate/util/EdgeAnalyzer.kt || fail "EdgeAnalyzer is missing luma-frame analysis."
++grep -q 'smoothedCorners' app/src/main/java/com/synthbyte/scanmate/util/EdgeAnalyzer.kt || fail "EdgeAnalyzer is missing temporal smoothing."
++grep -q 'runBestTextRecognition' app/src/main/java/com/synthbyte/scanmate/utils/OcrHelper.kt || fail "OCR multi-candidate pipeline missing."
++grep -q 'SCANMATE_REQUIRE_RELEASE_SIGNING' .github/workflows/android-build.yml || fail "Strict release signing check missing from workflow."
++
++echo "ScanMate release-candidate sanity checks passed."

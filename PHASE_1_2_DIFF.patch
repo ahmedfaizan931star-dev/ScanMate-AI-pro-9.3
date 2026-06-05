@@ -1,0 +1,879 @@
+diff -ruN scanmate_orig/ScanMate-AI-pro-9.3-main/PHASE_1_2_STABILITY_REPORT.md scanmate_work/ScanMate-AI-pro-9.3-main/PHASE_1_2_STABILITY_REPORT.md
+--- scanmate_orig/ScanMate-AI-pro-9.3-main/PHASE_1_2_STABILITY_REPORT.md	1970-01-01 00:00:00.000000000 +0000
++++ scanmate_work/ScanMate-AI-pro-9.3-main/PHASE_1_2_STABILITY_REPORT.md	2026-06-04 07:41:56.438241885 +0000
+@@ -0,0 +1,79 @@
++# ScanMate AI Pro Phase 1 + Phase 2 Stability Report
++
++## Scope
++
++This pass focused on release runtime stability and scanner edge-detection quality only.
++
++## Phase 1 — Signed APK DOCX Crash Repair
++
++### Problem
++The signed release APK showed a runtime error around the previous POI/XWPF DOCX path. Debug builds could pass because debug builds are not aggressively optimized by R8.
++
++### Fix
++- Replaced the Apache POI `XWPFDocument` runtime export path with a lightweight Office Open XML DOCX writer based on `ZipOutputStream`.
++- The exporter now writes the required DOCX package parts directly:
++  - `[Content_Types].xml`
++  - `_rels/.rels`
++  - `docProps/core.xml`
++  - `docProps/app.xml`
++  - `word/document.xml`
++  - `word/_rels/document.xml.rels`
++  - `word/styles.xml`
++  - `word/settings.xml`
++- Removed the unused `org.apache.poi:poi-ooxml:5.2.3` runtime dependency from `app/build.gradle.kts`.
++- Removed the unused POI version pin from `gradle/libs.versions.toml`.
++- Sanitized invalid XML control characters from OCR text before DOCX export.
++
++### Expected result
++- Release APK should no longer show the DOCX/XWPF runtime crash.
++- R8 should have less heavy desktop-Java dependency surface.
++- AAB/APK size may reduce.
++
++## Phase 2 — Scanner / Edge Detection Upgrade
++
++### Fixes and improvements
++- Replaced bitmap-heavy analyzer preprocessing with direct Y-plane luma sampling.
++- Added adaptive brightness thresholding using percentiles.
++- Added gradient/edge scoring instead of bright-area-only detection.
++- Added projection smoothing and gap-tolerant document bounds extraction.
++- Added skew-aware quadrilateral estimation from top/bottom edge bands.
++- Added temporal smoothing of corners and confidence to reduce jumping overlays.
++- Added rotation-aware smoothing reset.
++- Tuned auto-capture to require higher confidence and stable frames.
++- Improved perspective correction output sizing and point ordering.
++
++### Expected result
++- More stable document overlay.
++- Fewer false auto captures.
++- More reliable auto crop/perspective correction.
++- Better camera-scanner feel without adding risky native/OpenCV dependencies.
++
++## Changed files
++
++- `app/src/main/java/com/synthbyte/scanmate/utils/DocxExporter.kt`
++- `app/src/main/java/com/synthbyte/scanmate/util/EdgeAnalyzer.kt`
++- `app/src/main/java/com/synthbyte/scanmate/ui/screens/CameraScreen.kt`
++- `app/src/main/java/com/synthbyte/scanmate/utils/ImageProcessor.kt`
++- `app/build.gradle.kts`
++- `gradle/libs.versions.toml`
++- `app/proguard-rules.pro`
++
++## Verification performed in this environment
++
++- Kotlin syntax checked for `EdgeAnalyzer.kt` using local stubs.
++- Kotlin syntax checked for `DocxExporter.kt` using local stubs.
++- Kotlin syntax checked for `ImageProcessor.kt` using local stubs.
++- Generated a sample DOCX with the new package writer and verified ZIP integrity using `unzip -t`.
++
++## Verification not performed here
++
++Full Android Gradle build could not be run in this sandbox because Gradle distribution/dependencies require internet access and Android SDK tooling. GitHub Actions should run the full authoritative check after pushing.
++
++## Post-push checklist
++
++1. Push the fixed project to `main`.
++2. Confirm GitHub Actions green.
++3. Download signed release APK.
++4. Test DOCX export in signed release APK.
++5. Test auto edge detection on Android 11 and Android 16 phones.
++6. Only proceed to Play Console after release APK runtime testing passes.
+diff -ruN scanmate_orig/ScanMate-AI-pro-9.3-main/app/build.gradle.kts scanmate_work/ScanMate-AI-pro-9.3-main/app/build.gradle.kts
+--- scanmate_orig/ScanMate-AI-pro-9.3-main/app/build.gradle.kts	2026-06-04 00:08:38.000000000 +0000
++++ scanmate_work/ScanMate-AI-pro-9.3-main/app/build.gradle.kts	2026-06-04 07:35:07.329493750 +0000
+@@ -72,8 +72,7 @@
+     defaultConfig {
+         applicationId = "com.synthbyte.scanmate"
+ 
+-        // Required because Apache POI 5.2.3 / Log4j use MethodHandle APIs
+-        // that D8 cannot dex for minSdk 24/25.
++        // Android 8.0+ keeps CameraX, ML Kit, crypto, and document export stable.
+         minSdk = 26
+ 
+         targetSdk = targetSdkOverride
+@@ -197,7 +196,6 @@
+     implementation(libs.androidx.security.crypto)
+ 
+     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
+-    implementation("org.apache.poi:poi-ooxml:5.2.3")
+ 
+     implementation("com.itextpdf:itextg:5.5.10")
+     implementation("com.madgag.spongycastle:core:1.58.0.0")
+diff -ruN scanmate_orig/ScanMate-AI-pro-9.3-main/app/proguard-rules.pro scanmate_work/ScanMate-AI-pro-9.3-main/app/proguard-rules.pro
+--- scanmate_orig/ScanMate-AI-pro-9.3-main/app/proguard-rules.pro	2026-06-04 00:08:38.000000000 +0000
++++ scanmate_work/ScanMate-AI-pro-9.3-main/app/proguard-rules.pro	2026-06-04 07:40:14.671564375 +0000
+@@ -104,55 +104,31 @@
+ -dontwarn com.tom_roush.pdfbox.filter.JPXFilter
+ 
+ # ============================================================
+-# Apache POI / XMLBeans / DOCX export
++# DOCX export
+ # ============================================================
+ 
+-# Keep core POI/XMLBeans classes used for DOCX generation.
+--keep class org.apache.poi.** { *; }
+--keep class org.openxmlformats.schemas.** { *; }
+--keep class com.microsoft.schemas.** { *; }
+--keep class org.apache.xmlbeans.** { *; }
+-
+-# Apache POI references many optional OOXML schema classes.
+--dontwarn org.apache.poi.**
+--dontwarn org.openxmlformats.schemas.**
+--dontwarn com.microsoft.schemas.**
+--dontwarn schemaorg_apache_xmlbeans.**
+-
+-# XMLBeans generated schema internals.
+--dontwarn org.apache.xmlbeans.**
+--dontwarn org.apache.xmlbeans.impl.schema.**
+--dontwarn org.apache.xmlbeans.impl.values.**
+-
+-# XMLBeans / POI optional StAX references.
+--dontwarn javax.xml.stream.**
+-
+-# Saxon optional XPath backend used by XMLBeans if present.
+--dontwarn net.sf.saxon.**
++# DOCX export is now generated with a lightweight ZipOutputStream package writer.
++# Apache POI is intentionally not used at runtime to avoid signed-release R8/runtime crashes.
+ 
+ # ============================================================
+-# Java desktop/server APIs referenced by POI optional paths
++# Java desktop/server APIs referenced by optional document-library paths
+ # ============================================================
+ 
+-# Java AWT desktop classes referenced by Apache POI optional rendering/debug paths.
++# Java AWT desktop classes referenced by optional rendering/debug paths.
+ -dontwarn java.awt.**
+ -dontwarn java.awt.color.**
+ -dontwarn java.awt.font.**
+ -dontwarn java.awt.geom.**
+ -dontwarn java.awt.image.**
+ 
+-# W3C DOM optional desktop/XML APIs referenced by POI signing/SVG paths.
++# W3C DOM optional desktop/XML APIs referenced by optional signing/SVG paths.
+ -dontwarn org.w3c.dom.events.**
+ -dontwarn org.w3c.dom.svg.**
+ -dontwarn org.w3c.dom.traversal.**
+ 
+-# Batik optional SVG rendering used by Apache POI slideshow/image code.
++# Batik optional SVG rendering paths.
+ -dontwarn org.apache.batik.**
+ 
+-# Extra POI optional digital-signature / XML drawing paths.
+--dontwarn org.apache.poi.poifs.crypt.dsig.**
+--dontwarn org.apache.poi.xslf.draw.**
+--dontwarn org.apache.poi.xslf.usermodel.**
+ 
+ # ============================================================
+ # Log4j optional integrations
+diff -ruN scanmate_orig/ScanMate-AI-pro-9.3-main/app/src/main/java/com/synthbyte/scanmate/ui/screens/CameraScreen.kt scanmate_work/ScanMate-AI-pro-9.3-main/app/src/main/java/com/synthbyte/scanmate/ui/screens/CameraScreen.kt
+--- scanmate_orig/ScanMate-AI-pro-9.3-main/app/src/main/java/com/synthbyte/scanmate/ui/screens/CameraScreen.kt	2026-06-04 00:08:38.000000000 +0000
++++ scanmate_work/ScanMate-AI-pro-9.3-main/app/src/main/java/com/synthbyte/scanmate/ui/screens/CameraScreen.kt	2026-06-04 07:36:16.186855315 +0000
+@@ -166,7 +166,7 @@
+     var stableFrameCount by remember { mutableIntStateOf(0) }
+     var detectedCorners by remember { mutableStateOf<List<Offset>?>(null) }
+     var currentConfidence by remember { mutableStateOf(0f) }
+-    val isLocked = currentConfidence >= 0.75f
++    val isLocked = currentConfidence >= 0.82f
+     var selectedFilter by remember { mutableStateOf(FilterType.ORIGINAL) }
+ 
+     fun finishDocument() {
+@@ -334,7 +334,7 @@
+                                     return@setAnalyzer
+                                 }
+                                 val now = System.currentTimeMillis()
+-                                if (now - lastAnalyzedAt < 180L) return@setAnalyzer
++                                if (now - lastAnalyzedAt < 140L) return@setAnalyzer
+                                 lastAnalyzedAt = now
+                                 val result = EdgeAnalyzer.detect(imageProxy)
+                                 mainHandler.post {
+@@ -345,9 +345,9 @@
+                                     } else {
+                                         detectedCorners = result.corners
+                                         currentConfidence = result.confidence
+-                                        if (result.confidence > 0.62f && autoDetectEnabled && !isSaving && !isFinishing) {
++                                        if (result.confidence >= 0.82f && autoDetectEnabled && !isSaving && !isFinishing) {
+                                             stableFrameCount += 1
+-                                            if (stableFrameCount >= 10) {
++                                            if (stableFrameCount >= 6) {
+                                                 stableFrameCount = 0
+                                                 takePicture()
+                                             }
+diff -ruN scanmate_orig/ScanMate-AI-pro-9.3-main/app/src/main/java/com/synthbyte/scanmate/util/EdgeAnalyzer.kt scanmate_work/ScanMate-AI-pro-9.3-main/app/src/main/java/com/synthbyte/scanmate/util/EdgeAnalyzer.kt
+--- scanmate_orig/ScanMate-AI-pro-9.3-main/app/src/main/java/com/synthbyte/scanmate/util/EdgeAnalyzer.kt	2026-06-04 00:08:38.000000000 +0000
++++ scanmate_work/ScanMate-AI-pro-9.3-main/app/src/main/java/com/synthbyte/scanmate/util/EdgeAnalyzer.kt	2026-06-04 07:36:14.899439119 +0000
+@@ -1,7 +1,5 @@
+ package com.synthbyte.scanmate.util
+ 
+-import android.graphics.Bitmap
+-import android.graphics.Color
+ import androidx.camera.core.ImageProxy
+ import androidx.compose.ui.geometry.Offset
+ import kotlin.math.abs
+@@ -9,161 +7,331 @@
+ import kotlin.math.min
+ 
+ /**
+- * Lightweight offline document edge detector used by the CameraX preview analyzer.
++ * Offline document edge detector for the CameraX preview analyzer.
+  *
+- * The detector intentionally stays dependency-free: it samples the Y plane, builds an adaptive
+- * bright-region mask, extracts projection bounds, and returns normalized preview corners.
++ * This implementation intentionally avoids OpenCV/native dependencies so release APK/AAB builds stay
++ * small and stable. It samples the Y plane, builds adaptive brightness + edge projections, estimates
++ * skew-aware corners, then smooths consecutive detections to avoid jumpy scanner overlays.
+  */
+ object EdgeAnalyzer {
+ 
+     data class Result(val corners: List<Offset>, val confidence: Float)
+ 
+-    fun ImageProxy.toGrayscaleBitmap(): Bitmap {
+-        val yPlane = planes[0]
+-        val imageWidth = width
+-        val imageHeight = height
+-        val rowStride = yPlane.rowStride
+-        val pixelStride = yPlane.pixelStride.coerceAtLeast(1)
+-        val buffer = yPlane.buffer
+-        val bitmap = Bitmap.createBitmap(imageWidth, imageHeight, Bitmap.Config.ARGB_8888)
+-        val pixels = IntArray(imageWidth * imageHeight)
+-        val row = ByteArray(rowStride)
+-
+-        buffer.rewind()
+-        for (y in 0 until imageHeight) {
+-            val rowStart = y * rowStride
+-            if (rowStart >= buffer.limit()) break
+-            buffer.position(rowStart)
+-            val bytesToRead = min(rowStride, buffer.remaining())
+-            if (bytesToRead <= 0) break
+-            buffer.get(row, 0, bytesToRead)
+-
+-            for (x in 0 until imageWidth) {
+-                val sourceIndex = min(x * pixelStride, bytesToRead - 1).coerceAtLeast(0)
+-                val luma = row[sourceIndex].toInt() and 0xFF
+-                pixels[y * imageWidth + x] = Color.rgb(luma, luma, luma)
++    private const val SAMPLE_WIDTH = 320
++    private const val SAMPLE_HEIGHT = 240
++    private const val MIN_CONFIDENCE = 0.42f
++    private const val SMOOTHING_ALPHA = 0.36f
++
++    private var smoothedCorners: List<Offset>? = null
++    private var smoothedConfidence = 0f
++    private var missedFrames = 0
++    private var lastRotation = Int.MIN_VALUE
++
++    fun detect(image: ImageProxy): Result? {
++        val rotation = ((image.imageInfo.rotationDegrees % 360) + 360) % 360
++        if (lastRotation != rotation) {
++            resetSmoothing()
++            lastRotation = rotation
++        }
++
++        val raw = runCatching { detectRaw(image, rotation) }.getOrNull()
++        if (raw == null) {
++            missedFrames += 1
++            if (missedFrames >= 2) resetSmoothing()
++            val previous = smoothedCorners ?: return null
++            val decayed = (smoothedConfidence * 0.84f).coerceIn(0f, 1f)
++            return if (decayed >= MIN_CONFIDENCE) Result(previous, decayed) else null
++        }
++
++        missedFrames = 0
++        val previous = smoothedCorners
++        val nextCorners = if (previous != null && previous.size == 4) {
++            val maxJump = previous.zip(raw.corners).maxOf { (old, new) ->
++                max(abs(old.x - new.x), abs(old.y - new.y))
++            }
++            val alpha = if (maxJump > 0.22f) 0.72f else SMOOTHING_ALPHA
++            previous.zip(raw.corners).map { (old, new) ->
++                Offset(
++                    x = (old.x * (1f - alpha) + new.x * alpha).coerceIn(0f, 1f),
++                    y = (old.y * (1f - alpha) + new.y * alpha).coerceIn(0f, 1f)
++                )
+             }
++        } else {
++            raw.corners
+         }
+ 
+-        bitmap.setPixels(pixels, 0, imageWidth, 0, 0, imageWidth, imageHeight)
+-        return bitmap
++        smoothedCorners = nextCorners
++        smoothedConfidence = (smoothedConfidence * 0.45f + raw.confidence * 0.55f).coerceIn(0f, 1f)
++        return Result(nextCorners, smoothedConfidence)
+     }
+ 
+-    fun detect(image: ImageProxy): Result? {
+-        var bitmap: Bitmap? = null
+-        var scaled: Bitmap? = null
+-        return try {
+-            val grayscale = image.toGrayscaleBitmap()
+-            bitmap = grayscale
+-            scaled = Bitmap.createScaledBitmap(grayscale, 320, 240, true)
+-            val previewWidth = scaled.width
+-            val previewHeight = scaled.height
+-            val pixels = IntArray(previewWidth * previewHeight)
+-            scaled.getPixels(pixels, 0, previewWidth, 0, 0, previewWidth, previewHeight)
+-
+-            val luma = IntArray(pixels.size) { index -> Color.red(pixels[index]) }
+-            val mean = luma.average().toFloat()
+-            val sorted = luma.copyOf().also { it.sort() }
+-            val p70 = sorted[(sorted.lastIndex * 0.70f).toInt().coerceIn(0, sorted.lastIndex)]
+-            val threshold = max(mean + 18f, p70.toFloat()).coerceIn(72f, 235f)
+-
+-            val mask = BooleanArray(luma.size)
+-            var brightPixels = 0
+-            for (index in luma.indices) {
+-                val isDocumentPixel = luma[index] >= threshold
+-                mask[index] = isDocumentPixel
+-                if (isDocumentPixel) brightPixels++
+-            }
+-            if (brightPixels < mask.size * 0.05f) return null
+-
+-            val rowSum = IntArray(previewHeight)
+-            val colSum = IntArray(previewWidth)
+-            for (y in 0 until previewHeight) {
+-                val offset = y * previewWidth
+-                for (x in 0 until previewWidth) {
+-                    if (mask[offset + x]) {
+-                        rowSum[y]++
+-                        colSum[x]++
+-                    }
+-                }
+-            }
+-
+-            fun findBounds(sumArray: IntArray): Pair<Int, Int>? {
+-                val maxValue = sumArray.maxOrNull() ?: return null
+-                if (maxValue == 0) return null
+-                val projectionThreshold = max(3, (maxValue * 0.32f).toInt())
+-                var start = -1
+-                var bestStart = -1
+-                var bestEnd = -1
+-                var bestScore = 0
+-
+-                fun commit(endExclusive: Int) {
+-                    if (start == -1) return
+-                    val end = endExclusive - 1
+-                    val score = (start..end).sumOf { sumArray[it] }
+-                    val length = end - start + 1
+-                    if (length >= sumArray.size * 0.18f && score > bestScore) {
+-                        bestScore = score
+-                        bestStart = start
+-                        bestEnd = end
+-                    }
+-                    start = -1
+-                }
+-
+-                for (i in sumArray.indices) {
+-                    if (sumArray[i] >= projectionThreshold) {
+-                        if (start == -1) start = i
+-                    } else {
+-                        commit(i)
+-                    }
+-                }
+-                commit(sumArray.size)
+-                return if (bestStart >= 0 && bestEnd > bestStart) bestStart to bestEnd else null
+-            }
+-
+-            val vertical = findBounds(rowSum) ?: return null
+-            val horizontal = findBounds(colSum) ?: return null
+-
+-            val paddingX = (previewWidth * 0.015f).coerceAtLeast(4f)
+-            val paddingY = (previewHeight * 0.015f).coerceAtLeast(4f)
+-            val left = ((horizontal.first - paddingX) / previewWidth).coerceIn(0f, 1f)
+-            val right = ((horizontal.second + paddingX) / previewWidth).coerceIn(0f, 1f)
+-            val top = ((vertical.first - paddingY) / previewHeight).coerceIn(0f, 1f)
+-            val bottom = ((vertical.second + paddingY) / previewHeight).coerceIn(0f, 1f)
+-
+-            val detectedWidth = right - left
+-            val detectedHeight = bottom - top
+-            if (detectedWidth <= 0f || detectedHeight <= 0f) return null
+-
+-            val area = detectedWidth * detectedHeight
+-            if (area !in 0.12f..0.88f) return null
+-
+-            val detectedAspect = detectedWidth / detectedHeight
+-            val documentAspect = 1f / 1.4142f
+-            val inverseDocumentAspect = 1.4142f
+-            val aspectScore = max(
+-                0f,
+-                1f - min(abs(detectedAspect - documentAspect), abs(detectedAspect - inverseDocumentAspect))
+-            )
+-            val fillConfidence = (brightPixels.toFloat() / mask.size.toFloat() / area).coerceIn(0f, 1f)
+-            val areaScore = (area / 0.55f).coerceIn(0f, 1f)
+-            val confidence = (areaScore * 0.45f + aspectScore * 0.35f + fillConfidence * 0.20f).coerceIn(0f, 1f)
+-            if (confidence < 0.38f) return null
+-
+-            val corners = listOf(
+-                Offset(left, top),
+-                Offset(right, top),
+-                Offset(right, bottom),
+-                Offset(left, bottom)
+-            ).rotateNormalized(image.imageInfo.rotationDegrees)
+-
+-            Result(corners, confidence)
+-        } catch (_: Throwable) {
+-            null
+-        } finally {
+-            scaled?.recycle()
+-            bitmap?.recycle()
++    private fun detectRaw(image: ImageProxy, rotation: Int): Result? {
++        val sample = sampleLuma(image, SAMPLE_WIDTH, SAMPLE_HEIGHT) ?: return null
++        val width = SAMPLE_WIDTH
++        val height = SAMPLE_HEIGHT
++        val sorted = sample.copyOf().also { it.sort() }
++        val p10 = sorted.percentile(0.10f)
++        val p55 = sorted.percentile(0.55f)
++        val p72 = sorted.percentile(0.72f)
++        val p88 = sorted.percentile(0.88f)
++        val contrastRange = (p88 - p10).coerceAtLeast(1)
++        val threshold = max(p72, p55 + max(12, (contrastRange * 0.16f).toInt())).coerceIn(68, 236)
++        val edgeThreshold = max(24, (contrastRange * 0.22f).toInt()).coerceIn(24, 88)
++
++        val brightMask = BooleanArray(sample.size)
++        val edgeMap = IntArray(sample.size)
++        var brightCount = 0
++        var edgeCount = 0
++
++        for (y in 1 until height - 1) {
++            val rowOffset = y * width
++            for (x in 1 until width - 1) {
++                val index = rowOffset + x
++                val center = sample[index]
++                val horizontal = abs(sample[index - 1] - sample[index + 1])
++                val vertical = abs(sample[index - width] - sample[index + width])
++                val gradient = horizontal + vertical
++                edgeMap[index] = gradient
++                val isBright = center >= threshold
++                val isDocumentCandidate = isBright || (center >= p55 + 8 && gradient >= edgeThreshold)
++                brightMask[index] = isDocumentCandidate
++                if (isDocumentCandidate) brightCount += 1
++                if (gradient >= edgeThreshold) edgeCount += 1
++            }
++        }
++
++        if (brightCount < sample.size * 0.045f || edgeCount < sample.size * 0.018f) return null
++
++        val rowProjection = IntArray(height)
++        val colProjection = IntArray(width)
++        for (y in 1 until height - 1) {
++            val rowOffset = y * width
++            for (x in 1 until width - 1) {
++                val index = rowOffset + x
++                val brightWeight = if (brightMask[index]) 3 else 0
++                val edgeWeight = if (edgeMap[index] >= edgeThreshold) 2 else 0
++                val weight = brightWeight + edgeWeight
++                if (weight > 0) {
++                    rowProjection[y] += weight
++                    colProjection[x] += weight
++                }
++            }
+         }
++
++        val verticalBounds = findProjectionBounds(rowProjection, minLengthRatio = 0.22f) ?: return null
++        val horizontalBounds = findProjectionBounds(colProjection, minLengthRatio = 0.22f) ?: return null
++
++        val paddingX = max(5, (width * 0.018f).toInt())
++        val paddingY = max(5, (height * 0.018f).toInt())
++        val leftBound = (horizontalBounds.first - paddingX).coerceIn(0, width - 2)
++        val rightBound = (horizontalBounds.second + paddingX).coerceIn(leftBound + 1, width - 1)
++        val topBound = (verticalBounds.first - paddingY).coerceIn(0, height - 2)
++        val bottomBound = (verticalBounds.second + paddingY).coerceIn(topBound + 1, height - 1)
++
++        val quadrilateral = estimateQuadrilateral(
++            mask = brightMask,
++            edgeMap = edgeMap,
++            edgeThreshold = edgeThreshold,
++            width = width,
++            height = height,
++            left = leftBound,
++            top = topBound,
++            right = rightBound,
++            bottom = bottomBound
++        ) ?: listOf(
++            Offset(leftBound / width.toFloat(), topBound / height.toFloat()),
++            Offset(rightBound / width.toFloat(), topBound / height.toFloat()),
++            Offset(rightBound / width.toFloat(), bottomBound / height.toFloat()),
++            Offset(leftBound / width.toFloat(), bottomBound / height.toFloat())
++        )
++
++        val detectedWidth = (rightBound - leftBound).toFloat() / width.toFloat()
++        val detectedHeight = (bottomBound - topBound).toFloat() / height.toFloat()
++        val area = detectedWidth * detectedHeight
++        if (area !in 0.11f..0.90f) return null
++
++        val aspect = detectedWidth / detectedHeight.coerceAtLeast(0.001f)
++        val a4Portrait = 1f / 1.4142f
++        val a4Landscape = 1.4142f
++        val aspectError = min(abs(aspect - a4Portrait), abs(aspect - a4Landscape))
++        val aspectScore = (1f - aspectError / 0.95f).coerceIn(0f, 1f)
++        val areaScore = (area / 0.58f).coerceIn(0f, 1f)
++        val centerX = (leftBound + rightBound) / 2f / width.toFloat()
++        val centerY = (topBound + bottomBound) / 2f / height.toFloat()
++        val centerScore = (1f - (abs(centerX - 0.5f) + abs(centerY - 0.5f)) / 0.70f).coerceIn(0f, 1f)
++        val fillScore = (brightCount.toFloat() / sample.size.toFloat() / area.coerceAtLeast(0.08f)).coerceIn(0f, 1f)
++        val edgeScore = (edgeCount.toFloat() / sample.size.toFloat() / 0.12f).coerceIn(0f, 1f)
++        val borderPenalty = listOf(
++            leftBound / width.toFloat(),
++            topBound / height.toFloat(),
++            1f - rightBound / width.toFloat(),
++            1f - bottomBound / height.toFloat()
++        ).minOrNull()?.let { if (it < 0.012f) 0.12f else 0f } ?: 0f
++
++        val confidence = (
++            areaScore * 0.30f +
++                aspectScore * 0.18f +
++                fillScore * 0.18f +
++                edgeScore * 0.22f +
++                centerScore * 0.12f -
++                borderPenalty
++            ).coerceIn(0f, 1f)
++
++        if (confidence < MIN_CONFIDENCE) return null
++        return Result(quadrilateral.rotateNormalized(rotation), confidence)
++    }
++
++    private fun sampleLuma(image: ImageProxy, targetWidth: Int, targetHeight: Int): IntArray? {
++        val plane = image.planes.firstOrNull() ?: return null
++        val buffer = plane.buffer
++        val rowStride = plane.rowStride
++        val pixelStride = plane.pixelStride.coerceAtLeast(1)
++        val sourceWidth = image.width.coerceAtLeast(1)
++        val sourceHeight = image.height.coerceAtLeast(1)
++        val output = IntArray(targetWidth * targetHeight)
++
++        for (y in 0 until targetHeight) {
++            val sourceY = ((y + 0.5f) * sourceHeight / targetHeight).toInt().coerceIn(0, sourceHeight - 1)
++            for (x in 0 until targetWidth) {
++                val sourceX = ((x + 0.5f) * sourceWidth / targetWidth).toInt().coerceIn(0, sourceWidth - 1)
++                val index = sourceY * rowStride + sourceX * pixelStride
++                output[y * targetWidth + x] = if (index in 0 until buffer.limit()) {
++                    buffer.get(index).toInt() and 0xFF
++                } else {
++                    0
++                }
++            }
++        }
++        return output
++    }
++
++    private fun findProjectionBounds(values: IntArray, minLengthRatio: Float): Pair<Int, Int>? {
++        val smoothed = IntArray(values.size)
++        for (i in values.indices) {
++            var total = 0
++            var count = 0
++            for (j in (i - 2)..(i + 2)) {
++                if (j in values.indices) {
++                    total += values[j]
++                    count += 1
++                }
++            }
++            smoothed[i] = if (count == 0) values[i] else total / count
++        }
++
++        val maxValue = smoothed.maxOrNull() ?: return null
++        if (maxValue <= 0) return null
++        val threshold = max(4, (maxValue * 0.20f).toInt())
++        val minLength = max(8, (values.size * minLengthRatio).toInt())
++        var start = -1
++        var gap = 0
++        var bestStart = -1
++        var bestEnd = -1
++        var bestScore = Int.MIN_VALUE
++
++        fun commit(endExclusive: Int) {
++            if (start < 0) return
++            val end = (endExclusive - gap - 1).coerceAtLeast(start)
++            val length = end - start + 1
++            if (length >= minLength) {
++                val score = (start..end).sumOf { smoothed[it] } + length * 3
++                if (score > bestScore) {
++                    bestScore = score
++                    bestStart = start
++                    bestEnd = end
++                }
++            }
++            start = -1
++            gap = 0
++        }
++
++        for (i in smoothed.indices) {
++            if (smoothed[i] >= threshold) {
++                if (start < 0) start = i
++                gap = 0
++            } else if (start >= 0) {
++                gap += 1
++                if (gap > 4) commit(i + 1)
++            }
++        }
++        commit(smoothed.size)
++        return if (bestStart >= 0 && bestEnd > bestStart) bestStart to bestEnd else null
++    }
++
++    private fun estimateQuadrilateral(
++        mask: BooleanArray,
++        edgeMap: IntArray,
++        edgeThreshold: Int,
++        width: Int,
++        height: Int,
++        left: Int,
++        top: Int,
++        right: Int,
++        bottom: Int
++    ): List<Offset>? {
++        val scanHeight = (bottom - top + 1).coerceAtLeast(1)
++        val bandHeight = max(10, (scanHeight * 0.22f).toInt())
++        val topLefts = mutableListOf<Int>()
++        val topRights = mutableListOf<Int>()
++        val bottomLefts = mutableListOf<Int>()
++        val bottomRights = mutableListOf<Int>()
++
++        fun collectForRow(y: Int, lefts: MutableList<Int>, rights: MutableList<Int>) {
++            if (y !in 1 until height - 1) return
++            var rowLeft = -1
++            var rowRight = -1
++            val offset = y * width
++            for (x in left..right) {
++                val index = offset + x
++                if (index in mask.indices && (mask[index] || edgeMap[index] >= edgeThreshold)) {
++                    rowLeft = x
++                    break
++                }
++            }
++            for (x in right downTo left) {
++                val index = offset + x
++                if (index in mask.indices && (mask[index] || edgeMap[index] >= edgeThreshold)) {
++                    rowRight = x
++                    break
++                }
++            }
++            if (rowLeft >= 0 && rowRight > rowLeft && rowRight - rowLeft > (right - left) * 0.45f) {
++                lefts += rowLeft
++                rights += rowRight
++            }
++        }
++
++        for (y in top until min(bottom, top + bandHeight)) collectForRow(y, topLefts, topRights)
++        for (y in max(top, bottom - bandHeight)..bottom) collectForRow(y, bottomLefts, bottomRights)
++
++        if (topLefts.size < 4 || topRights.size < 4 || bottomLefts.size < 4 || bottomRights.size < 4) return null
++
++        val tlX = topLefts.trimmedMedian().coerceIn(0, width - 1)
++        val trX = topRights.trimmedMedian().coerceIn(0, width - 1)
++        val blX = bottomLefts.trimmedMedian().coerceIn(0, width - 1)
++        val brX = bottomRights.trimmedMedian().coerceIn(0, width - 1)
++
++        return listOf(
++            Offset(tlX / width.toFloat(), top / height.toFloat()),
++            Offset(trX / width.toFloat(), top / height.toFloat()),
++            Offset(brX / width.toFloat(), bottom / height.toFloat()),
++            Offset(blX / width.toFloat(), bottom / height.toFloat())
++        ).map { Offset(it.x.coerceIn(0f, 1f), it.y.coerceIn(0f, 1f)) }
++    }
++
++    private fun IntArray.percentile(percent: Float): Int {
++        if (isEmpty()) return 0
++        val index = (lastIndex * percent).toInt().coerceIn(0, lastIndex)
++        return this[index]
++    }
++
++    private fun List<Int>.trimmedMedian(): Int {
++        if (isEmpty()) return 0
++        val sorted = sorted()
++        val from = (sorted.size * 0.15f).toInt().coerceIn(0, sorted.lastIndex)
++        val to = (sorted.size * 0.85f).toInt().coerceIn(from, sorted.lastIndex)
++        val trimmed = sorted.subList(from, to + 1)
++        return trimmed[trimmed.size / 2]
+     }
+ 
+     private fun List<Offset>.rotateNormalized(rotationDegrees: Int): List<Offset> {
+@@ -174,4 +342,10 @@
+             else -> this
+         }
+     }
++
++    private fun resetSmoothing() {
++        smoothedCorners = null
++        smoothedConfidence = 0f
++        missedFrames = 0
++    }
+ }
+diff -ruN scanmate_orig/ScanMate-AI-pro-9.3-main/app/src/main/java/com/synthbyte/scanmate/utils/DocxExporter.kt scanmate_work/ScanMate-AI-pro-9.3-main/app/src/main/java/com/synthbyte/scanmate/utils/DocxExporter.kt
+--- scanmate_orig/ScanMate-AI-pro-9.3-main/app/src/main/java/com/synthbyte/scanmate/utils/DocxExporter.kt	2026-06-04 00:08:38.000000000 +0000
++++ scanmate_work/ScanMate-AI-pro-9.3-main/app/src/main/java/com/synthbyte/scanmate/utils/DocxExporter.kt	2026-06-04 07:40:25.244084045 +0000
+@@ -11,7 +11,6 @@
+ import java.util.zip.ZipEntry
+ import java.util.zip.CRC32
+ import java.util.zip.ZipOutputStream
+-import org.apache.poi.xwpf.usermodel.XWPFDocument
+ 
+ object DocxExporter {
+     suspend fun saveXlsxFromText(context: Context, text: String, filename: String): File? = withContext(Dispatchers.IO) {
+@@ -290,21 +289,25 @@
+         }
+     }
+ 
++    /**
++     * Writes a valid DOCX without Apache POI at runtime.
++     *
++     * The release APK previously crashed in the previous POI-based DOCX runtime path.
++     * A DOCX is an OPC ZIP package,
++     * so this exporter writes the small set of Office XML parts ScanMate needs for OCR text export.
++     */
+     fun exportDocx(text: String, file: File) {
+-        val doc = XWPFDocument()
+-        try {
+-            text.split("\n").forEach { line ->
+-                val para = doc.createParagraph()
+-                val run = para.createRun()
+-                run.setText(line.ifEmpty { " " })
+-                run.fontFamily = "Calibri"
+-                run.fontSize = 11
+-            }
+-            FileOutputStream(file).use { outputStream ->
+-                doc.write(outputStream)
+-            }
+-        } finally {
+-            doc.close()
++        file.parentFile?.mkdirs()
++        val safeText = text.ifBlank { "ScanMate AI Pro document export" }
++        ZipOutputStream(BufferedOutputStream(FileOutputStream(file))).use { zip ->
++            zip.putDocxEntry("[Content_Types].xml", contentTypesXml())
++            zip.putDocxEntry("_rels/.rels", rootRelsXml())
++            zip.putDocxEntry("docProps/core.xml", officeCoreXml(file.nameWithoutExtension.ifBlank { "ScanMate Document" }))
++            zip.putDocxEntry("docProps/app.xml", officeAppXml())
++            zip.putDocxEntry("word/document.xml", buildDocumentXml(safeText))
++            zip.putDocxEntry("word/_rels/document.xml.rels", wordRelsXml())
++            zip.putDocxEntry("word/styles.xml", stylesXml())
++            zip.putDocxEntry("word/settings.xml", settingsXml())
+         }
+     }
+ 
+@@ -316,6 +319,8 @@
+     <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+     <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
+     <Override PartName="/word/settings.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/>
++    <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
++    <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
+ </Types>
+ """.trimIndent()
+ 
+@@ -323,6 +328,8 @@
+ <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+ <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+     <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
++    <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>
++    <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>
+ </Relationships>
+ """.trimIndent()
+ 
+@@ -414,6 +421,7 @@
+     }
+ 
+     private fun escapeXml(value: String): String = value
++        .filter { char -> char == '\t' || char == '\n' || char == '\r' || char.code >= 0x20 }
+         .replace("&", "&amp;")
+         .replace("<", "&lt;")
+         .replace(">", "&gt;")
+diff -ruN scanmate_orig/ScanMate-AI-pro-9.3-main/app/src/main/java/com/synthbyte/scanmate/utils/ImageProcessor.kt scanmate_work/ScanMate-AI-pro-9.3-main/app/src/main/java/com/synthbyte/scanmate/utils/ImageProcessor.kt
+--- scanmate_orig/ScanMate-AI-pro-9.3-main/app/src/main/java/com/synthbyte/scanmate/utils/ImageProcessor.kt	2026-06-04 00:08:38.000000000 +0000
++++ scanmate_work/ScanMate-AI-pro-9.3-main/app/src/main/java/com/synthbyte/scanmate/utils/ImageProcessor.kt	2026-06-04 07:37:16.799061876 +0000
+@@ -20,6 +20,7 @@
+ import kotlin.math.max
+ import kotlin.math.min
+ import kotlin.math.roundToInt
++import kotlin.math.sqrt
+ 
+ val ImageProcessingDispatcher = Dispatchers.Default.limitedParallelism(2)
+ 
+@@ -80,44 +81,64 @@
+         previewHeight: Int
+     ): File? {
+         if (corners.size != 4) return null
+-        val bitmap = decodeSampledBitmap(file.absolutePath, 2048, 2048) ?: return null
++        val bitmap = decodeSampledBitmap(file.absolutePath, 2600, 2600) ?: return null
+         val safePreviewWidth = previewWidth.coerceAtLeast(1)
+         val safePreviewHeight = previewHeight.coerceAtLeast(1)
+         val scaleX = bitmap.width.toFloat() / safePreviewWidth
+         val scaleY = bitmap.height.toFloat() / safePreviewHeight
+         val cornersAreNormalized = corners.all { it.x in 0f..1f && it.y in 0f..1f }
+-        fun mappedX(point: Offset): Float = if (cornersAreNormalized) point.x * bitmap.width else point.x * scaleX
+-        fun mappedY(point: Offset): Float = if (cornersAreNormalized) point.y * bitmap.height else point.y * scaleY
+-        val src = floatArrayOf(
+-            mappedX(corners[0]), mappedY(corners[0]),
+-            mappedX(corners[1]), mappedY(corners[1]),
+-            mappedX(corners[2]), mappedY(corners[2]),
+-            mappedX(corners[3]), mappedY(corners[3])
+-        )
+-        val w = bitmap.width.toFloat()
+-        val h = bitmap.height.toFloat()
+-        val dst = floatArrayOf(0f, 0f, w, 0f, w, h, 0f, h)
++        fun mappedPoint(point: Offset): Offset = if (cornersAreNormalized) {
++            Offset(point.x * bitmap.width, point.y * bitmap.height)
++        } else {
++            Offset(point.x * scaleX, point.y * scaleY)
++        }
++
++        val ordered = orderDocumentCorners(corners.map(::mappedPoint), bitmap.width, bitmap.height)
++        val tl = ordered[0]
++        val tr = ordered[1]
++        val br = ordered[2]
++        val bl = ordered[3]
++        val targetWidth = max(distance(tl, tr), distance(bl, br)).roundToInt().coerceIn(320, bitmap.width.coerceAtLeast(320))
++        val targetHeight = max(distance(tl, bl), distance(tr, br)).roundToInt().coerceIn(320, bitmap.height.coerceAtLeast(320))
++
++        val src = floatArrayOf(tl.x, tl.y, tr.x, tr.y, br.x, br.y, bl.x, bl.y)
++        val dst = floatArrayOf(0f, 0f, targetWidth.toFloat(), 0f, targetWidth.toFloat(), targetHeight.toFloat(), 0f, targetHeight.toFloat())
+         val matrix = Matrix()
+         val mapped = matrix.setPolyToPoly(src, 0, dst, 0, 4)
+         if (!mapped) {
+             bitmap.recycle()
+             return null
+         }
+-        val warped = Bitmap.createBitmap(bitmap.width, bitmap.height, Bitmap.Config.ARGB_8888)
++        val warped = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
+         val canvas = Canvas(warped)
+         canvas.drawColor(Color.WHITE)
+-        canvas.drawBitmap(bitmap, matrix, Paint(Paint.FILTER_BITMAP_FLAG))
++        canvas.drawBitmap(bitmap, matrix, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+         bitmap.recycle()
+         val parent = file.parent ?: run {
+             warped.recycle()
+             return null
+         }
+         val out = File(parent, "warped_${file.name}")
+-        FileOutputStream(out).use { warped.compress(Bitmap.CompressFormat.JPEG, 93, it) }
++        FileOutputStream(out).use { warped.compress(Bitmap.CompressFormat.JPEG, 94, it) }
+         warped.recycle()
+         return out.takeIf { it.exists() && it.length() > 0L }
+     }
+ 
++    private fun orderDocumentCorners(points: List<Offset>, maxWidth: Int, maxHeight: Int): List<Offset> {
++        val safe = points.map { Offset(it.x.coerceIn(0f, maxWidth.toFloat()), it.y.coerceIn(0f, maxHeight.toFloat())) }
++        val topLeft = safe.minBy { it.x + it.y }
++        val bottomRight = safe.maxBy { it.x + it.y }
++        val topRight = safe.maxBy { it.x - it.y }
++        val bottomLeft = safe.minBy { it.x - it.y }
++        return listOf(topLeft, topRight, bottomRight, bottomLeft)
++    }
++
++    private fun distance(a: Offset, b: Offset): Float {
++        val dx = a.x - b.x
++        val dy = a.y - b.y
++        return sqrt(dx * dx + dy * dy)
++    }
++
+     fun rotateBitmap(source: Bitmap, degrees: Float): Bitmap {
+         val matrix = android.graphics.Matrix().apply { postRotate(degrees) }
+         return Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
+diff -ruN scanmate_orig/ScanMate-AI-pro-9.3-main/gradle/libs.versions.toml scanmate_work/ScanMate-AI-pro-9.3-main/gradle/libs.versions.toml
+--- scanmate_orig/ScanMate-AI-pro-9.3-main/gradle/libs.versions.toml	2026-06-04 00:08:38.000000000 +0000
++++ scanmate_work/ScanMate-AI-pro-9.3-main/gradle/libs.versions.toml	2026-06-04 07:40:14.671097141 +0000
+@@ -31,7 +31,6 @@
+ biometric = "1.2.0-alpha05"
+ security-crypto = "1.1.0-alpha06"
+ pdfbox-android = "2.0.27.0"
+-poi-ooxml = "5.2.3"
+ 
+ [libraries]
+ androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }

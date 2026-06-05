@@ -72,8 +72,7 @@ android {
     defaultConfig {
         applicationId = "com.synthbyte.scanmate"
 
-        // Required because Apache POI 5.2.3 / Log4j use MethodHandle APIs
-        // that D8 cannot dex for minSdk 24/25.
+        // Android 8.0+ keeps CameraX, ML Kit, crypto, and document export stable.
         minSdk = 26
 
         targetSdk = targetSdkOverride
@@ -197,7 +196,6 @@ dependencies {
     implementation(libs.androidx.security.crypto)
 
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
-    implementation("org.apache.poi:poi-ooxml:5.2.3")
 
     implementation("com.itextpdf:itextg:5.5.10")
     implementation("com.madgag.spongycastle:core:1.58.0.0")

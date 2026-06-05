@@ -11,7 +11,6 @@ import java.io.FileOutputStream
 import java.util.zip.ZipEntry
 import java.util.zip.CRC32
 import java.util.zip.ZipOutputStream
-import org.apache.poi.xwpf.usermodel.XWPFDocument
 
 object DocxExporter {
     suspend fun saveXlsxFromText(context: Context, text: String, filename: String): File? = withContext(Dispatchers.IO) {
@@ -290,21 +289,25 @@ object DocxExporter {
         }
     }
 
+    /**
+     * Writes a valid DOCX without Apache POI at runtime.
+     *
+     * The release APK previously crashed in the previous POI-based DOCX runtime path.
+     * A DOCX is an OPC ZIP package,
+     * so this exporter writes the small set of Office XML parts ScanMate needs for OCR text export.
+     */
     fun exportDocx(text: String, file: File) {
-        val doc = XWPFDocument()
-        try {
-            text.split("\n").forEach { line ->
-                val para = doc.createParagraph()
-                val run = para.createRun()
-                run.setText(line.ifEmpty { " " })
-                run.fontFamily = "Calibri"
-                run.fontSize = 11
-            }
-            FileOutputStream(file).use { outputStream ->
-                doc.write(outputStream)
-            }
-        } finally {
-            doc.close()
+        file.parentFile?.mkdirs()
+        val safeText = text.ifBlank { "ScanMate AI Pro document export" }
+        ZipOutputStream(BufferedOutputStream(FileOutputStream(file))).use { zip ->
+            zip.putDocxEntry("[Content_Types].xml", contentTypesXml())
+            zip.putDocxEntry("_rels/.rels", rootRelsXml())
+            zip.putDocxEntry("docProps/core.xml", officeCoreXml(file.nameWithoutExtension.ifBlank { "ScanMate Document" }))
+            zip.putDocxEntry("docProps/app.xml", officeAppXml())
+            zip.putDocxEntry("word/document.xml", buildDocumentXml(safeText))
+            zip.putDocxEntry("word/_rels/document.xml.rels", wordRelsXml())
+            zip.putDocxEntry("word/styles.xml", stylesXml())
+            zip.putDocxEntry("word/settings.xml", settingsXml())
         }
     }
 
@@ -316,6 +319,8 @@ object DocxExporter {
     <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
     <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
     <Override PartName="/word/settings.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/>
+    <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
+    <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
 </Types>
 """.trimIndent()
 
@@ -323,6 +328,8 @@ object DocxExporter {
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
     <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+    <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>
+    <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>
 </Relationships>
 """.trimIndent()
 
@@ -414,6 +421,7 @@ object DocxExporter {
     }
 
     private fun escapeXml(value: String): String = value
+        .filter { char -> char == '\t' || char == '\n' || char == '\r' || char.code >= 0x20 }
         .replace("&", "&amp;")
         .replace("<", "&lt;")
         .replace(">", "&gt;")
