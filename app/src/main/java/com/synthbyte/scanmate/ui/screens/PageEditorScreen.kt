@@ -574,24 +574,40 @@ private fun ToolSectionTitle(text: String) {
 
 @Composable
 private fun ManualCropDialog(onDismiss: () -> Unit, onApply: (Float, Float, Float, Float) -> Unit) {
-    var left by remember { mutableFloatStateOf(0f) }
-    var top by remember { mutableFloatStateOf(0f) }
-    var right by remember { mutableFloatStateOf(0f) }
-    var bottom by remember { mutableFloatStateOf(0f) }
+    var left by remember { mutableFloatStateOf(0.04f) }
+    var top by remember { mutableFloatStateOf(0.04f) }
+    var right by remember { mutableFloatStateOf(0.04f) }
+    var bottom by remember { mutableFloatStateOf(0.04f) }
+
+    fun setPreset(value: Float) {
+        left = value
+        top = value
+        right = value
+        bottom = value
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Manual crop") },
+        title = { Text("Crop page") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                CropSlider("Left", left) { left = it }
-                CropSlider("Top", top) { top = it }
-                CropSlider("Right", right) { right = it }
-                CropSlider("Bottom", bottom) { bottom = it }
-                Text("Crop values are gentle by default so document text stays readable.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    "Choose a crop style, then fine tune only if needed. For exact page corners, use the Corners tool.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(onClick = { setPreset(0.02f) }, modifier = Modifier.weight(1f)) { Text("Wide") }
+                    OutlinedButton(onClick = { setPreset(0.05f) }, modifier = Modifier.weight(1f)) { Text("Balanced") }
+                    OutlinedButton(onClick = { setPreset(0.09f) }, modifier = Modifier.weight(1f)) { Text("Tight") }
+                }
+                CropSlider("Left edge", left) { left = it }
+                CropSlider("Top edge", top) { top = it }
+                CropSlider("Right edge", right) { right = it }
+                CropSlider("Bottom edge", bottom) { bottom = it }
             }
         },
-        confirmButton = { Button(onClick = { onApply(left, top, right, bottom) }) { Text("Apply") } },
+        confirmButton = { Button(onClick = { onApply(left, top, right, bottom) }) { Text("Apply crop") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )
 }
@@ -696,8 +712,12 @@ private fun CornerHandle(position: Offset, boxWidth: Float, boxHeight: Float, on
 
 @Composable
 private fun CropSlider(label: String, value: Float, onChange: (Float) -> Unit) {
-    Column {
-        Text("$label ${(value * 100).toInt()}%", style = MaterialTheme.typography.bodyMedium)
-        Slider(value = value, onValueChange = onChange, valueRange = 0f..0.35f)
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(label, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+        Slider(value = value, onValueChange = onChange, valueRange = 0f..0.22f)
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("Keep more", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Trim more", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }

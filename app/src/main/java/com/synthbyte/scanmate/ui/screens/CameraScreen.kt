@@ -24,6 +24,7 @@ import androidx.camera.view.PreviewView
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -146,7 +147,7 @@ fun CameraScreen(
     val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
     val previewView = remember {
         PreviewView(context).apply {
-            scaleType = PreviewView.ScaleType.FILL_CENTER
+            scaleType = PreviewView.ScaleType.FIT_CENTER
             implementationMode = PreviewView.ImplementationMode.COMPATIBLE
         }
     }
@@ -164,16 +165,19 @@ fun CameraScreen(
     var cameraError by remember { mutableStateOf<String?>(null) }
     var autoDetectEnabled by remember { mutableStateOf(true) }
     var stableFrameCount by remember { mutableIntStateOf(0) }
+    var analysisFrameCount by remember { mutableIntStateOf(0) }
     var lastAutoCaptureAt by remember { mutableStateOf(0L) }
     var detectedCorners by remember { mutableStateOf<List<Offset>?>(null) }
     var currentConfidence by remember { mutableStateOf(0f) }
-    val isLocked = currentConfidence >= 0.82f
+    val isLocked = detectedCorners != null && currentConfidence >= 0.82f
+    val hasLiveDetection = detectedCorners != null
     var selectedFilter by remember { mutableStateOf(FilterType.ORIGINAL) }
     val scannerHint = when {
-        !autoDetectEnabled -> "Auto edge detection is off"
-        detectedCorners == null -> "Place document inside the frame"
+        !autoDetectEnabled -> "Manual scan · align inside the frame"
+        analysisFrameCount == 0 -> "Starting smart scanner…"
+        !hasLiveDetection -> "Place page inside the guide"
         currentConfidence >= 0.86f -> "Document locked · hold steady"
-        currentConfidence >= 0.72f -> "Almost ready · hold steady"
+        currentConfidence >= 0.62f -> "Almost ready · hold steady"
         else -> "Move closer or improve lighting"
     }
 
@@ -237,7 +241,7 @@ fun CameraScreen(
                             }
 
                             val corners = detectedCorners
-                            if (corners != null && corners.size == 4 && currentConfidence >= 0.72f) {
+                            if (corners != null && corners.size == 4 && currentConfidence >= 0.55f) {
                                 FileUtils.applyPerspectiveCorrection(
                                     file = filteredFile,
                                     corners = corners,
@@ -344,6 +348,7 @@ fun CameraScreen(
                                 lastAnalyzedAt = now
                                 val result = EdgeAnalyzer.detect(imageProxy)
                                 mainHandler.post {
+                                    analysisFrameCount += 1
                                     if (result == null) {
                                         detectedCorners = null
                                         currentConfidence = 0f
@@ -352,19 +357,19 @@ fun CameraScreen(
                                         detectedCorners = result.corners
                                         currentConfidence = result.confidence
                                         val nowMain = System.currentTimeMillis()
-                                        val autoCaptureReady = result.confidence >= 0.84f &&
+                                        val autoCaptureReady = result.confidence >= 0.80f &&
                                             autoDetectEnabled &&
                                             !isSaving &&
                                             !isFinishing &&
                                             nowMain - lastAutoCaptureAt > 2200L
                                         if (autoCaptureReady) {
                                             stableFrameCount += 1
-                                            if (stableFrameCount >= 7) {
+                                            if (stableFrameCount >= 6) {
                                                 stableFrameCount = 0
                                                 lastAutoCaptureAt = nowMain
                                                 takePicture()
                                             }
-                                        } else if (result.confidence < 0.72f || isSaving || isFinishing) {
+                                        } else if (result.confidence < 0.58f || isSaving || isFinishing) {
                                             stableFrameCount = 0
                                         }
                                     }
@@ -380,6 +385,8 @@ fun CameraScreen(
                 cameraProvider.unbindAll()
                 camera = cameraProvider.bindToLifecycle(lifecycleOwner, selector, preview, capture, analysis)
                 imageCapture = capture
+                analysisFrameCount = 0
+                stableFrameCount = 0
                 torchEnabled = false
             }
         }.onFailure { throwable ->
@@ -552,19 +559,38 @@ fun CameraScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Spacer(modifier = Modifier.width(52.dp))
+                AssistChip(
+                    onClick = {},
+                    label = { Text(if (hasLiveDetection) "Edges ${((currentConfidence * 100).toInt()).coerceIn(0, 100)}%" else "Guide") },
+                    shape = RoundedCornerShape(50),
+                    colors = AssistChipDefaults.assistChipColors(
+                        containerColor = Color.White.copy(alpha = 0.12f),
+                        labelColor = Color.White
+                    )
+                )
                 FloatingActionButton(
                     onClick = { takePicture() },
                     shape = CircleShape,
                     containerColor = Color.White,
-                    modifier = Modifier.size(68.dp),
-                    elevation = FloatingActionButtonDefaults.elevation(0.dp)
-                ) {}
+                    modifier = Modifier
+                        .size(74.dp)
+                        .border(3.dp, MaterialTheme.colorScheme.primary.copy(alpha = if (isLocked) 1f else 0.55f), CircleShape),
+                    elevation = FloatingActionButtonDefaults.elevation(2.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(46.dp)
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = if (isSaving) 0.28f else 0.16f), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (isSaving) CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(24.dp))
+                    }
+                }
                 FloatingActionButton(
                     onClick = { finishDocument() },
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(16.dp),
                     containerColor = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(52.dp),
+                    modifier = Modifier.size(56.dp),
                     elevation = FloatingActionButtonDefaults.elevation(8.dp)
                 ) {
                     if (isFinishing) {

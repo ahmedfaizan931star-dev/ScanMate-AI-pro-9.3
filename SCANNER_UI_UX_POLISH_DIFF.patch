@@ -1,0 +1,466 @@
+diff -ruN scanmate_base/ScanMate-AI-pro-9.3-main/app/src/main/AndroidManifest.xml scanmate_work/ScanMate-AI-pro-9.3-main/app/src/main/AndroidManifest.xml
+--- scanmate_base/ScanMate-AI-pro-9.3-main/app/src/main/AndroidManifest.xml	2026-06-04 00:08:38.000000000 +0000
++++ scanmate_work/ScanMate-AI-pro-9.3-main/app/src/main/AndroidManifest.xml	2026-06-06 01:17:33.831879006 +0000
+@@ -23,6 +23,10 @@
+         android:theme="@style/Theme.ScanMate"
+         android:usesCleartextTraffic="false"
+         tools:targetApi="31">
++        <meta-data
++            android:name="com.google.mlkit.vision.DEPENDENCIES"
++            android:value="ocr,barcode" />
++
+ 
+         <provider
+             android:name="androidx.core.content.FileProvider"
+diff -ruN scanmate_base/ScanMate-AI-pro-9.3-main/app/src/main/java/com/synthbyte/scanmate/ui/components/DocumentOverlay.kt scanmate_work/ScanMate-AI-pro-9.3-main/app/src/main/java/com/synthbyte/scanmate/ui/components/DocumentOverlay.kt
+--- scanmate_base/ScanMate-AI-pro-9.3-main/app/src/main/java/com/synthbyte/scanmate/ui/components/DocumentOverlay.kt	2026-06-04 00:08:38.000000000 +0000
++++ scanmate_work/ScanMate-AI-pro-9.3-main/app/src/main/java/com/synthbyte/scanmate/ui/components/DocumentOverlay.kt	2026-06-06 01:16:28.568661027 +0000
+@@ -1,8 +1,15 @@
+ package com.synthbyte.scanmate.ui.components
+ 
++import androidx.compose.animation.core.FastOutSlowInEasing
++import androidx.compose.animation.core.RepeatMode
+ import androidx.compose.animation.core.Spring
++import androidx.compose.animation.core.animateFloat
++import androidx.compose.animation.core.animateFloatAsState
+ import androidx.compose.animation.core.animateOffsetAsState
++import androidx.compose.animation.core.infiniteRepeatable
++import androidx.compose.animation.core.rememberInfiniteTransition
+ import androidx.compose.animation.core.spring
++import androidx.compose.animation.core.tween
+ import androidx.compose.foundation.Canvas
+ import androidx.compose.foundation.layout.Box
+ import androidx.compose.foundation.layout.fillMaxSize
+@@ -11,49 +18,72 @@
+ import androidx.compose.runtime.getValue
+ import androidx.compose.ui.Modifier
+ import androidx.compose.ui.geometry.Offset
++import androidx.compose.ui.graphics.Color
+ import androidx.compose.ui.graphics.Path
++import androidx.compose.ui.graphics.PathEffect
+ import androidx.compose.ui.graphics.StrokeCap
+ import androidx.compose.ui.graphics.StrokeJoin
+ import androidx.compose.ui.graphics.drawscope.Stroke
+ import androidx.compose.ui.unit.dp
+-import androidx.compose.animation.core.animateFloatAsState
+-import androidx.compose.animation.core.tween
+-import androidx.compose.animation.core.rememberInfiniteTransition
+-import androidx.compose.animation.core.infiniteRepeatable
+-import androidx.compose.animation.core.animateFloat
+-import androidx.compose.animation.core.RepeatMode
+-import androidx.compose.animation.core.FastOutSlowInEasing
+-import androidx.compose.ui.graphics.Color
+-import androidx.compose.ui.graphics.PathEffect
+ 
+ /**
+- * Draws an animated document quadrilateral from normalized corner offsets in the [0f, 1f] range.
++ * Draws the scanner guide/edge overlay.
++ *
++ * A default frame is always rendered when live edge detection has no result, so the signed APK never
++ * shows a blank camera surface. When [corners] are provided, the same renderer animates the detected
++ * document quadrilateral and confidence state.
+  */
+ @Composable
+ fun DocumentOverlay(corners: List<Offset>?, confidence: Float = 0f) {
+-    if (corners == null || corners.size != 4) return
++    val defaultFrame = rememberDefaultFrame()
++    val activeCorners = if (corners != null && corners.size == 4) corners else defaultFrame
++    val hasDetection = corners != null && corners.size == 4
+ 
+     val infiniteTransition = rememberInfiniteTransition(label = "scan_pulse")
+     val pulseAlpha by infiniteTransition.animateFloat(
+-        initialValue = 0.4f,
++        initialValue = 0.45f,
+         targetValue = 1f,
+-        animationSpec = infiniteRepeatable(tween(800, easing = FastOutSlowInEasing), RepeatMode.Reverse),
++        animationSpec = infiniteRepeatable(tween(900, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+         label = "pulse"
+     )
+     val cornerScale by infiniteTransition.animateFloat(
+         initialValue = 1f,
+-        targetValue = 1.15f,
+-        animationSpec = infiniteRepeatable(tween(600, easing = FastOutSlowInEasing), RepeatMode.Reverse),
++        targetValue = 1.13f,
++        animationSpec = infiniteRepeatable(tween(700, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+         label = "corner_scale"
+     )
+-    val isLocked = confidence >= 0.75f
+-    val animAlpha by animateFloatAsState(if (isLocked) 1f else pulseAlpha, animationSpec = tween(300), label = "overlay_alpha")
+-    val strokeEffect = if (isLocked) null else PathEffect.dashPathEffect(floatArrayOf(14f, 7f), phase = 0f)
+-    val overlayColor = if (isLocked) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary
+-    val tl by animateOffsetAsState(corners[0].coercedUnit(), animationSpec = spring(stiffness = Spring.StiffnessMediumLow), label = "doc_tl")
+-    val tr by animateOffsetAsState(corners[1].coercedUnit(), animationSpec = spring(stiffness = Spring.StiffnessMediumLow), label = "doc_tr")
+-    val br by animateOffsetAsState(corners[2].coercedUnit(), animationSpec = spring(stiffness = Spring.StiffnessMediumLow), label = "doc_br")
+-    val bl by animateOffsetAsState(corners[3].coercedUnit(), animationSpec = spring(stiffness = Spring.StiffnessMediumLow), label = "doc_bl")
++    val isLocked = hasDetection && confidence >= 0.75f
++    val isCandidate = hasDetection && confidence >= 0.45f
++    val animAlpha by animateFloatAsState(
++        targetValue = when {
++            isLocked -> 1f
++            isCandidate -> pulseAlpha.coerceAtLeast(0.70f)
++            else -> 0.62f
++        },
++        animationSpec = tween(260),
++        label = "overlay_alpha"
++    )
++
++    val strokeEffect = when {
++        isLocked -> null
++        isCandidate -> PathEffect.dashPathEffect(floatArrayOf(16f, 8f), phase = 0f)
++        else -> PathEffect.dashPathEffect(floatArrayOf(20f, 12f), phase = 0f)
++    }
++    val overlayColor = when {
++        isLocked -> MaterialTheme.colorScheme.tertiary
++        isCandidate -> MaterialTheme.colorScheme.primary
++        else -> MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.94f)
++    }
++    val fillColor = when {
++        isLocked -> MaterialTheme.colorScheme.tertiary.copy(alpha = 0.18f)
++        isCandidate -> MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)
++        else -> Color.Transparent
++    }
++
++    val tl by animateOffsetAsState(activeCorners[0].coercedUnit(), animationSpec = spring(stiffness = Spring.StiffnessMediumLow), label = "doc_tl")
++    val tr by animateOffsetAsState(activeCorners[1].coercedUnit(), animationSpec = spring(stiffness = Spring.StiffnessMediumLow), label = "doc_tr")
++    val br by animateOffsetAsState(activeCorners[2].coercedUnit(), animationSpec = spring(stiffness = Spring.StiffnessMediumLow), label = "doc_br")
++    val bl by animateOffsetAsState(activeCorners[3].coercedUnit(), animationSpec = spring(stiffness = Spring.StiffnessMediumLow), label = "doc_bl")
+ 
+     Box(Modifier.fillMaxSize()) {
+         Canvas(Modifier.fillMaxSize()) {
+@@ -65,30 +95,37 @@
+                 lineTo(bl.toCanvasOffset().x, bl.toCanvasOffset().y)
+                 close()
+             }
+-            // 1. Semi-transparent fill
+-            drawPath(path, color = overlayColor.copy(alpha = animAlpha * if (isLocked) 0.18f else 0.08f))
+ 
+-            // 2. Animated stroke
++            if (fillColor.alpha > 0f) {
++                drawPath(path, color = fillColor.copy(alpha = fillColor.alpha * animAlpha))
++            }
++
+             drawPath(
+                 path = path,
+                 color = overlayColor.copy(alpha = animAlpha),
+                 style = Stroke(
+-                    width = (if (isLocked) 3.5f else 2.5f).dp.toPx(),
++                    width = (if (isLocked) 3.6f else 2.7f).dp.toPx(),
+                     cap = StrokeCap.Round,
+                     join = StrokeJoin.Round,
+                     pathEffect = strokeEffect
+                 )
+             )
+ 
+-            // 3. Corner accent dots — scale pulse when not locked
+             listOf(tl, tr, br, bl).forEach { c ->
+                 val pt = c.toCanvasOffset()
+                 val r = (if (isLocked) 7f else 6f * cornerScale).dp.toPx()
+-                drawCircle(Color.White, radius = r + 2.dp.toPx(), center = pt, style = Stroke(2.dp.toPx()))
++                drawCircle(Color.White.copy(alpha = 0.92f), radius = r + 2.dp.toPx(), center = pt, style = Stroke(2.dp.toPx()))
+                 drawCircle(overlayColor.copy(alpha = animAlpha), radius = r, center = pt)
+             }
+         }
+     }
+ }
+ 
++private fun rememberDefaultFrame(): List<Offset> = listOf(
++    Offset(0.10f, 0.18f),
++    Offset(0.90f, 0.18f),
++    Offset(0.90f, 0.78f),
++    Offset(0.10f, 0.78f)
++)
++
+ private fun Offset.coercedUnit(): Offset = Offset(x.coerceIn(0f, 1f), y.coerceIn(0f, 1f))
+diff -ruN scanmate_base/ScanMate-AI-pro-9.3-main/app/src/main/java/com/synthbyte/scanmate/ui/screens/CameraScreen.kt scanmate_work/ScanMate-AI-pro-9.3-main/app/src/main/java/com/synthbyte/scanmate/ui/screens/CameraScreen.kt
+--- scanmate_base/ScanMate-AI-pro-9.3-main/app/src/main/java/com/synthbyte/scanmate/ui/screens/CameraScreen.kt	2026-06-04 12:30:06.000000000 +0000
++++ scanmate_work/ScanMate-AI-pro-9.3-main/app/src/main/java/com/synthbyte/scanmate/ui/screens/CameraScreen.kt	2026-06-06 01:17:28.459344236 +0000
+@@ -24,6 +24,7 @@
+ import androidx.compose.animation.AnimatedVisibility
+ import androidx.compose.animation.animateContentSize
+ import androidx.compose.foundation.background
++import androidx.compose.foundation.border
+ import androidx.compose.foundation.clickable
+ import androidx.compose.foundation.layout.Arrangement
+ import androidx.compose.foundation.layout.Box
+@@ -146,7 +147,7 @@
+     val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
+     val previewView = remember {
+         PreviewView(context).apply {
+-            scaleType = PreviewView.ScaleType.FILL_CENTER
++            scaleType = PreviewView.ScaleType.FIT_CENTER
+             implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+         }
+     }
+@@ -164,16 +165,19 @@
+     var cameraError by remember { mutableStateOf<String?>(null) }
+     var autoDetectEnabled by remember { mutableStateOf(true) }
+     var stableFrameCount by remember { mutableIntStateOf(0) }
++    var analysisFrameCount by remember { mutableIntStateOf(0) }
+     var lastAutoCaptureAt by remember { mutableStateOf(0L) }
+     var detectedCorners by remember { mutableStateOf<List<Offset>?>(null) }
+     var currentConfidence by remember { mutableStateOf(0f) }
+-    val isLocked = currentConfidence >= 0.82f
++    val isLocked = detectedCorners != null && currentConfidence >= 0.82f
++    val hasLiveDetection = detectedCorners != null
+     var selectedFilter by remember { mutableStateOf(FilterType.ORIGINAL) }
+     val scannerHint = when {
+-        !autoDetectEnabled -> "Auto edge detection is off"
+-        detectedCorners == null -> "Place document inside the frame"
++        !autoDetectEnabled -> "Manual scan · align inside the frame"
++        analysisFrameCount == 0 -> "Starting smart scanner…"
++        !hasLiveDetection -> "Place page inside the guide"
+         currentConfidence >= 0.86f -> "Document locked · hold steady"
+-        currentConfidence >= 0.72f -> "Almost ready · hold steady"
++        currentConfidence >= 0.62f -> "Almost ready · hold steady"
+         else -> "Move closer or improve lighting"
+     }
+ 
+@@ -237,7 +241,7 @@
+                             }
+ 
+                             val corners = detectedCorners
+-                            if (corners != null && corners.size == 4 && currentConfidence >= 0.72f) {
++                            if (corners != null && corners.size == 4 && currentConfidence >= 0.55f) {
+                                 FileUtils.applyPerspectiveCorrection(
+                                     file = filteredFile,
+                                     corners = corners,
+@@ -344,6 +348,7 @@
+                                 lastAnalyzedAt = now
+                                 val result = EdgeAnalyzer.detect(imageProxy)
+                                 mainHandler.post {
++                                    analysisFrameCount += 1
+                                     if (result == null) {
+                                         detectedCorners = null
+                                         currentConfidence = 0f
+@@ -352,19 +357,19 @@
+                                         detectedCorners = result.corners
+                                         currentConfidence = result.confidence
+                                         val nowMain = System.currentTimeMillis()
+-                                        val autoCaptureReady = result.confidence >= 0.84f &&
++                                        val autoCaptureReady = result.confidence >= 0.80f &&
+                                             autoDetectEnabled &&
+                                             !isSaving &&
+                                             !isFinishing &&
+                                             nowMain - lastAutoCaptureAt > 2200L
+                                         if (autoCaptureReady) {
+                                             stableFrameCount += 1
+-                                            if (stableFrameCount >= 7) {
++                                            if (stableFrameCount >= 6) {
+                                                 stableFrameCount = 0
+                                                 lastAutoCaptureAt = nowMain
+                                                 takePicture()
+                                             }
+-                                        } else if (result.confidence < 0.72f || isSaving || isFinishing) {
++                                        } else if (result.confidence < 0.58f || isSaving || isFinishing) {
+                                             stableFrameCount = 0
+                                         }
+                                     }
+@@ -380,6 +385,8 @@
+                 cameraProvider.unbindAll()
+                 camera = cameraProvider.bindToLifecycle(lifecycleOwner, selector, preview, capture, analysis)
+                 imageCapture = capture
++                analysisFrameCount = 0
++                stableFrameCount = 0
+                 torchEnabled = false
+             }
+         }.onFailure { throwable ->
+@@ -552,19 +559,38 @@
+                 horizontalArrangement = Arrangement.SpaceBetween,
+                 verticalAlignment = Alignment.CenterVertically
+             ) {
+-                Spacer(modifier = Modifier.width(52.dp))
++                AssistChip(
++                    onClick = {},
++                    label = { Text(if (hasLiveDetection) "Edges ${((currentConfidence * 100).toInt()).coerceIn(0, 100)}%" else "Guide") },
++                    shape = RoundedCornerShape(50),
++                    colors = AssistChipDefaults.assistChipColors(
++                        containerColor = Color.White.copy(alpha = 0.12f),
++                        labelColor = Color.White
++                    )
++                )
+                 FloatingActionButton(
+                     onClick = { takePicture() },
+                     shape = CircleShape,
+                     containerColor = Color.White,
+-                    modifier = Modifier.size(68.dp),
+-                    elevation = FloatingActionButtonDefaults.elevation(0.dp)
+-                ) {}
++                    modifier = Modifier
++                        .size(74.dp)
++                        .border(3.dp, MaterialTheme.colorScheme.primary.copy(alpha = if (isLocked) 1f else 0.55f), CircleShape),
++                    elevation = FloatingActionButtonDefaults.elevation(2.dp)
++                ) {
++                    Box(
++                        modifier = Modifier
++                            .size(46.dp)
++                            .background(MaterialTheme.colorScheme.primary.copy(alpha = if (isSaving) 0.28f else 0.16f), CircleShape),
++                        contentAlignment = Alignment.Center
++                    ) {
++                        if (isSaving) CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(24.dp))
++                    }
++                }
+                 FloatingActionButton(
+                     onClick = { finishDocument() },
+-                    shape = RoundedCornerShape(12.dp),
++                    shape = RoundedCornerShape(16.dp),
+                     containerColor = MaterialTheme.colorScheme.primary,
+-                    modifier = Modifier.size(52.dp),
++                    modifier = Modifier.size(56.dp),
+                     elevation = FloatingActionButtonDefaults.elevation(8.dp)
+                 ) {
+                     if (isFinishing) {
+diff -ruN scanmate_base/ScanMate-AI-pro-9.3-main/app/src/main/java/com/synthbyte/scanmate/ui/screens/PageEditorScreen.kt scanmate_work/ScanMate-AI-pro-9.3-main/app/src/main/java/com/synthbyte/scanmate/ui/screens/PageEditorScreen.kt
+--- scanmate_base/ScanMate-AI-pro-9.3-main/app/src/main/java/com/synthbyte/scanmate/ui/screens/PageEditorScreen.kt	2026-06-04 00:08:38.000000000 +0000
++++ scanmate_work/ScanMate-AI-pro-9.3-main/app/src/main/java/com/synthbyte/scanmate/ui/screens/PageEditorScreen.kt	2026-06-06 01:17:18.246008404 +0000
+@@ -574,24 +574,40 @@
+ 
+ @Composable
+ private fun ManualCropDialog(onDismiss: () -> Unit, onApply: (Float, Float, Float, Float) -> Unit) {
+-    var left by remember { mutableFloatStateOf(0f) }
+-    var top by remember { mutableFloatStateOf(0f) }
+-    var right by remember { mutableFloatStateOf(0f) }
+-    var bottom by remember { mutableFloatStateOf(0f) }
++    var left by remember { mutableFloatStateOf(0.04f) }
++    var top by remember { mutableFloatStateOf(0.04f) }
++    var right by remember { mutableFloatStateOf(0.04f) }
++    var bottom by remember { mutableFloatStateOf(0.04f) }
++
++    fun setPreset(value: Float) {
++        left = value
++        top = value
++        right = value
++        bottom = value
++    }
+ 
+     AlertDialog(
+         onDismissRequest = onDismiss,
+-        title = { Text("Manual crop") },
++        title = { Text("Crop page") },
+         text = {
+-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+-                CropSlider("Left", left) { left = it }
+-                CropSlider("Top", top) { top = it }
+-                CropSlider("Right", right) { right = it }
+-                CropSlider("Bottom", bottom) { bottom = it }
+-                Text("Crop values are gentle by default so document text stays readable.", color = MaterialTheme.colorScheme.onSurfaceVariant)
++            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
++                Text(
++                    "Choose a crop style, then fine tune only if needed. For exact page corners, use the Corners tool.",
++                    color = MaterialTheme.colorScheme.onSurfaceVariant,
++                    style = MaterialTheme.typography.bodyMedium
++                )
++                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
++                    OutlinedButton(onClick = { setPreset(0.02f) }, modifier = Modifier.weight(1f)) { Text("Wide") }
++                    OutlinedButton(onClick = { setPreset(0.05f) }, modifier = Modifier.weight(1f)) { Text("Balanced") }
++                    OutlinedButton(onClick = { setPreset(0.09f) }, modifier = Modifier.weight(1f)) { Text("Tight") }
++                }
++                CropSlider("Left edge", left) { left = it }
++                CropSlider("Top edge", top) { top = it }
++                CropSlider("Right edge", right) { right = it }
++                CropSlider("Bottom edge", bottom) { bottom = it }
+             }
+         },
+-        confirmButton = { Button(onClick = { onApply(left, top, right, bottom) }) { Text("Apply") } },
++        confirmButton = { Button(onClick = { onApply(left, top, right, bottom) }) { Text("Apply crop") } },
+         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+     )
+ }
+@@ -696,8 +712,12 @@
+ 
+ @Composable
+ private fun CropSlider(label: String, value: Float, onChange: (Float) -> Unit) {
+-    Column {
+-        Text("$label ${(value * 100).toInt()}%", style = MaterialTheme.typography.bodyMedium)
+-        Slider(value = value, onValueChange = onChange, valueRange = 0f..0.35f)
++    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
++        Text(label, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
++        Slider(value = value, onValueChange = onChange, valueRange = 0f..0.22f)
++        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
++            Text("Keep more", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
++            Text("Trim more", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
++        }
+     }
+ }
+diff -ruN scanmate_base/ScanMate-AI-pro-9.3-main/app/src/main/java/com/synthbyte/scanmate/util/EdgeAnalyzer.kt scanmate_work/ScanMate-AI-pro-9.3-main/app/src/main/java/com/synthbyte/scanmate/util/EdgeAnalyzer.kt
+--- scanmate_base/ScanMate-AI-pro-9.3-main/app/src/main/java/com/synthbyte/scanmate/util/EdgeAnalyzer.kt	2026-06-04 07:36:14.000000000 +0000
++++ scanmate_work/ScanMate-AI-pro-9.3-main/app/src/main/java/com/synthbyte/scanmate/util/EdgeAnalyzer.kt	2026-06-06 01:16:38.448059533 +0000
+@@ -19,8 +19,8 @@
+ 
+     private const val SAMPLE_WIDTH = 320
+     private const val SAMPLE_HEIGHT = 240
+-    private const val MIN_CONFIDENCE = 0.42f
+-    private const val SMOOTHING_ALPHA = 0.36f
++    private const val MIN_CONFIDENCE = 0.30f
++    private const val SMOOTHING_ALPHA = 0.42f
+ 
+     private var smoothedCorners: List<Offset>? = null
+     private var smoothedConfidence = 0f
+@@ -37,7 +37,7 @@
+         val raw = runCatching { detectRaw(image, rotation) }.getOrNull()
+         if (raw == null) {
+             missedFrames += 1
+-            if (missedFrames >= 2) resetSmoothing()
++            if (missedFrames >= 5) resetSmoothing()
+             val previous = smoothedCorners ?: return null
+             val decayed = (smoothedConfidence * 0.84f).coerceIn(0f, 1f)
+             return if (decayed >= MIN_CONFIDENCE) Result(previous, decayed) else null
+@@ -100,7 +100,7 @@
+             }
+         }
+ 
+-        if (brightCount < sample.size * 0.045f || edgeCount < sample.size * 0.018f) return null
++        if (brightCount < sample.size * 0.030f || edgeCount < sample.size * 0.010f) return null
+ 
+         val rowProjection = IntArray(height)
+         val colProjection = IntArray(width)
+@@ -118,8 +118,12 @@
+             }
+         }
+ 
+-        val verticalBounds = findProjectionBounds(rowProjection, minLengthRatio = 0.22f) ?: return null
+-        val horizontalBounds = findProjectionBounds(colProjection, minLengthRatio = 0.22f) ?: return null
++        val verticalBounds = findProjectionBounds(rowProjection, minLengthRatio = 0.16f)
++            ?: findProjectionBounds(rowProjection, minLengthRatio = 0.10f)
++            ?: return null
++        val horizontalBounds = findProjectionBounds(colProjection, minLengthRatio = 0.16f)
++            ?: findProjectionBounds(colProjection, minLengthRatio = 0.10f)
++            ?: return null
+ 
+         val paddingX = max(5, (width * 0.018f).toInt())
+         val paddingY = max(5, (height * 0.018f).toInt())
+@@ -148,7 +152,7 @@
+         val detectedWidth = (rightBound - leftBound).toFloat() / width.toFloat()
+         val detectedHeight = (bottomBound - topBound).toFloat() / height.toFloat()
+         val area = detectedWidth * detectedHeight
+-        if (area !in 0.11f..0.90f) return null
++        if (area !in 0.065f..0.94f) return null
+ 
+         val aspect = detectedWidth / detectedHeight.coerceAtLeast(0.001f)
+         val a4Portrait = 1f / 1.4142f
+@@ -166,7 +170,7 @@
+             topBound / height.toFloat(),
+             1f - rightBound / width.toFloat(),
+             1f - bottomBound / height.toFloat()
+-        ).minOrNull()?.let { if (it < 0.012f) 0.12f else 0f } ?: 0f
++        ).minOrNull()?.let { if (it < 0.008f) 0.08f else 0f } ?: 0f
+ 
+         val confidence = (
+             areaScore * 0.30f +
+@@ -221,7 +225,7 @@
+ 
+         val maxValue = smoothed.maxOrNull() ?: return null
+         if (maxValue <= 0) return null
+-        val threshold = max(4, (maxValue * 0.20f).toInt())
++        val threshold = max(3, (maxValue * 0.15f).toInt())
+         val minLength = max(8, (values.size * minLengthRatio).toInt())
+         var start = -1
+         var gap = 0
+@@ -251,7 +255,7 @@
+                 gap = 0
+             } else if (start >= 0) {
+                 gap += 1
+-                if (gap > 4) commit(i + 1)
++                if (gap > 7) commit(i + 1)
+             }
+         }
+         commit(smoothed.size)

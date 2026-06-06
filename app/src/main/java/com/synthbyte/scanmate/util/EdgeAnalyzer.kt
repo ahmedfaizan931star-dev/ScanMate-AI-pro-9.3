@@ -19,8 +19,8 @@ object EdgeAnalyzer {
 
     private const val SAMPLE_WIDTH = 320
     private const val SAMPLE_HEIGHT = 240
-    private const val MIN_CONFIDENCE = 0.42f
-    private const val SMOOTHING_ALPHA = 0.36f
+    private const val MIN_CONFIDENCE = 0.30f
+    private const val SMOOTHING_ALPHA = 0.42f
 
     private var smoothedCorners: List<Offset>? = null
     private var smoothedConfidence = 0f
@@ -37,7 +37,7 @@ object EdgeAnalyzer {
         val raw = runCatching { detectRaw(image, rotation) }.getOrNull()
         if (raw == null) {
             missedFrames += 1
-            if (missedFrames >= 2) resetSmoothing()
+            if (missedFrames >= 5) resetSmoothing()
             val previous = smoothedCorners ?: return null
             val decayed = (smoothedConfidence * 0.84f).coerceIn(0f, 1f)
             return if (decayed >= MIN_CONFIDENCE) Result(previous, decayed) else null
@@ -100,7 +100,7 @@ object EdgeAnalyzer {
             }
         }
 
-        if (brightCount < sample.size * 0.045f || edgeCount < sample.size * 0.018f) return null
+        if (brightCount < sample.size * 0.030f || edgeCount < sample.size * 0.010f) return null
 
         val rowProjection = IntArray(height)
         val colProjection = IntArray(width)
@@ -118,8 +118,12 @@ object EdgeAnalyzer {
             }
         }
 
-        val verticalBounds = findProjectionBounds(rowProjection, minLengthRatio = 0.22f) ?: return null
-        val horizontalBounds = findProjectionBounds(colProjection, minLengthRatio = 0.22f) ?: return null
+        val verticalBounds = findProjectionBounds(rowProjection, minLengthRatio = 0.16f)
+            ?: findProjectionBounds(rowProjection, minLengthRatio = 0.10f)
+            ?: return null
+        val horizontalBounds = findProjectionBounds(colProjection, minLengthRatio = 0.16f)
+            ?: findProjectionBounds(colProjection, minLengthRatio = 0.10f)
+            ?: return null
 
         val paddingX = max(5, (width * 0.018f).toInt())
         val paddingY = max(5, (height * 0.018f).toInt())
@@ -148,7 +152,7 @@ object EdgeAnalyzer {
         val detectedWidth = (rightBound - leftBound).toFloat() / width.toFloat()
         val detectedHeight = (bottomBound - topBound).toFloat() / height.toFloat()
         val area = detectedWidth * detectedHeight
-        if (area !in 0.11f..0.90f) return null
+        if (area !in 0.065f..0.94f) return null
 
         val aspect = detectedWidth / detectedHeight.coerceAtLeast(0.001f)
         val a4Portrait = 1f / 1.4142f
@@ -166,7 +170,7 @@ object EdgeAnalyzer {
             topBound / height.toFloat(),
             1f - rightBound / width.toFloat(),
             1f - bottomBound / height.toFloat()
-        ).minOrNull()?.let { if (it < 0.012f) 0.12f else 0f } ?: 0f
+        ).minOrNull()?.let { if (it < 0.008f) 0.08f else 0f } ?: 0f
 
         val confidence = (
             areaScore * 0.30f +
@@ -221,7 +225,7 @@ object EdgeAnalyzer {
 
         val maxValue = smoothed.maxOrNull() ?: return null
         if (maxValue <= 0) return null
-        val threshold = max(4, (maxValue * 0.20f).toInt())
+        val threshold = max(3, (maxValue * 0.15f).toInt())
         val minLength = max(8, (values.size * minLengthRatio).toInt())
         var start = -1
         var gap = 0
@@ -251,7 +255,7 @@ object EdgeAnalyzer {
                 gap = 0
             } else if (start >= 0) {
                 gap += 1
-                if (gap > 4) commit(i + 1)
+                if (gap > 7) commit(i + 1)
             }
         }
         commit(smoothed.size)

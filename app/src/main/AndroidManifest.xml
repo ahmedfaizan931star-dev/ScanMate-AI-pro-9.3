@@ -23,6 +23,10 @@
         android:theme="@style/Theme.ScanMate"
         android:usesCleartextTraffic="false"
         tools:targetApi="31">
+        <meta-data
+            android:name="com.google.mlkit.vision.DEPENDENCIES"
+            android:value="ocr,barcode" />
+
 
         <provider
             android:name="androidx.core.content.FileProvider"
