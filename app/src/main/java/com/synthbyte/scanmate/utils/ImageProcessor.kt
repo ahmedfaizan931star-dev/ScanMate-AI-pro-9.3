@@ -257,159 +257,205 @@ object ImageProcessor {
     }
 
     private fun detectDocumentBounds(source: Bitmap): RectF? {
-        val sampled = source.scaleDownToMax(820) ?: return null
-        val width = sampled.width
-        val height = sampled.height
-        if (width < 80 || height < 80) return null
-        val pixels = IntArray(width * height).also { sampled.getPixels(it, 0, width, 0, 0, width, height) }
-        val luma = IntArray(pixels.size)
-        for (i in pixels.indices) {
-            val px = pixels[i]
-            luma[i] = (Color.red(px) * 0.299f + Color.green(px) * 0.587f + Color.blue(px) * 0.114f).roundToInt()
-        }
-        val border = ArrayList<Int>(width * 2 + height * 2)
-        val step = max(1, max(width, height) / 260)
-        for (x in 0 until width step step) {
-            border += luma[x]
-            border += luma[(height - 1) * width + x]
-        }
-        for (y in 0 until height step step) {
-            border += luma[y * width]
-            border += luma[y * width + width - 1]
-        }
-        val sortedLuma = luma.copyOf().also { it.sort() }
-        val sortedBorder = border.sorted()
-        val background = sortedBorder.percentile(0.50f)
-        val p20 = sortedLuma.percentile(0.20f)
-        val p55 = sortedLuma.percentile(0.55f)
-        val p82 = sortedLuma.percentile(0.82f)
-        val contrastRange = (p82 - p20).coerceAtLeast(1)
-        val brightPageThreshold = max(background + 16, p55 + max(8, contrastRange / 7)).coerceIn(80, 245)
-        val darkContentThreshold = min(background - 20, p20 + 12).coerceIn(20, 210)
-        val rowProjection = IntArray(height)
-        val colProjection = IntArray(width)
-
-        for (y in 1 until height - 1 step step) {
-            val row = y * width
-            for (x in 1 until width - 1 step step) {
-                val index = row + x
-                val lum = luma[index]
-                val gradient = abs(luma[index - 1] - luma[index + 1]) + abs(luma[index - width] - luma[index + width])
-                val likelyBrightPage = lum >= brightPageThreshold && lum > background + 8
-                val likelyDarkPageOrInk = background > 178 && lum <= darkContentThreshold
-                val strongEdge = gradient >= max(22, contrastRange / 5)
-                if (likelyBrightPage || likelyDarkPageOrInk || strongEdge) {
-                    val weight = if (likelyBrightPage) 4 else if (strongEdge) 2 else 1
-                    rowProjection[y] += weight
-                    colProjection[x] += weight
+            val sampled = source.scaleDownToMax(900) ?: return null
+            val width = sampled.width
+            val height = sampled.height
+            if (width < 80 || height < 80) {
+                if (sampled !== source && !sampled.isRecycled) runCatching { sampled.recycle() }
+                return null
+            }
+    
+            fun finish(result: RectF?): RectF? {
+                if (sampled !== source && !sampled.isRecycled) runCatching { sampled.recycle() }
+                return result
+            }
+    
+            val pixels = IntArray(width * height).also { sampled.getPixels(it, 0, width, 0, 0, width, height) }
+            val luma = IntArray(pixels.size)
+            for (i in pixels.indices) {
+                val px = pixels[i]
+                luma[i] = (Color.red(px) * 0.299f + Color.green(px) * 0.587f + Color.blue(px) * 0.114f).roundToInt().coerceIn(0, 255)
+            }
+    
+            val step = max(1, max(width, height) / 300)
+            val border = ArrayList<Int>(width * 2 + height * 2)
+            for (x in 0 until width step step) {
+                border += luma[x]
+                border += luma[(height - 1) * width + x]
+            }
+            for (y in 0 until height step step) {
+                border += luma[y * width]
+                border += luma[y * width + width - 1]
+            }
+    
+            val sortedLuma = luma.copyOf().also { it.sort() }
+            val sortedBorder = border.sorted()
+            val background = sortedBorder.percentile(0.50f)
+            val p12 = sortedLuma.percentile(0.12f)
+            val p22 = sortedLuma.percentile(0.22f)
+            val p55 = sortedLuma.percentile(0.55f)
+            val p86 = sortedLuma.percentile(0.86f)
+            val contrastRange = (p86 - p12).coerceAtLeast(1)
+            if (contrastRange < 18) return finish(null)
+    
+            val brightPageThreshold = max(background + 14, p55 + max(7, contrastRange / 8)).coerceIn(78, 246)
+            val darkContentThreshold = min(background - 18, p22 + 12).coerceIn(18, 214)
+            val rowProjection = IntArray(height)
+            val colProjection = IntArray(width)
+    
+            for (y in 1 until height - 1 step step) {
+                val row = y * width
+                for (x in 1 until width - 1 step step) {
+                    val index = row + x
+                    val lum = luma[index]
+                    val gx = abs(luma[index - 1] - luma[index + 1])
+                    val gy = abs(luma[index - width] - luma[index + width])
+                    val gradient = gx + gy
+                    val likelyBrightPage = lum >= brightPageThreshold && lum > background + 6
+                    val likelyDarkPageOrInk = background > 174 && lum <= darkContentThreshold
+                    val strongEdge = gradient >= max(24, contrastRange / 5)
+                    if (likelyBrightPage || likelyDarkPageOrInk || strongEdge) {
+                        val weight = when {
+                            likelyBrightPage -> 5
+                            strongEdge -> 3
+                            else -> 1
+                        }
+                        rowProjection[y] += weight
+                        colProjection[x] += weight
+                    }
                 }
             }
+    
+            val horizontal = activeProjectionRange(colProjection, minLength = (width * 0.30f).roundToInt()) ?: return finish(null)
+            val vertical = activeProjectionRange(rowProjection, minLength = (height * 0.30f).roundToInt()) ?: return finish(null)
+            val detectedWidth = horizontal.second - horizontal.first + 1
+            val detectedHeight = vertical.second - vertical.first + 1
+            val sampleAreaRatio = detectedWidth.toFloat() * detectedHeight.toFloat() / (width.toFloat() * height.toFloat()).coerceAtLeast(1f)
+            val sampleAspect = detectedWidth.toFloat() / detectedHeight.toFloat().coerceAtLeast(1f)
+            if (sampleAreaRatio !in 0.20f..0.990f || sampleAspect !in 0.24f..4.25f) return finish(null)
+    
+            val projectionStrength = (
+                rowProjection.sliceArray(vertical.first..vertical.second).average() +
+                    colProjection.sliceArray(horizontal.first..horizontal.second).average()
+                ) / 2.0
+            val peakStrength = max(rowProjection.maxOrNull() ?: 0, colProjection.maxOrNull() ?: 0).coerceAtLeast(1)
+            if (projectionStrength < peakStrength * 0.045) return finish(null)
+    
+            // Conservative outward padding: keep content over trimming too tightly.
+            val marginX = max(8, (width * 0.045f).roundToInt())
+            val marginY = max(8, (height * 0.045f).roundToInt())
+            val sx = source.width.toFloat() / width.toFloat()
+            val sy = source.height.toFloat() / height.toFloat()
+            val left = ((horizontal.first - marginX).coerceAtLeast(0) * sx)
+            val top = ((vertical.first - marginY).coerceAtLeast(0) * sy)
+            val right = ((horizontal.second + marginX).coerceAtMost(width - 1) * sx)
+            val bottom = ((vertical.second + marginY).coerceAtMost(height - 1) * sy)
+    
+            val boxWidth = right - left
+            val boxHeight = bottom - top
+            val areaRatio = (boxWidth * boxHeight) / (source.width.toFloat() * source.height.toFloat()).coerceAtLeast(1f)
+            val aspect = boxWidth / boxHeight.coerceAtLeast(1f)
+            if (boxWidth < source.width * 0.32f || boxHeight < source.height * 0.32f) return finish(null)
+            return finish(if (areaRatio in 0.20f..0.995f && aspect in 0.24f..4.25f) RectF(left, top, right, bottom) else null)
         }
-
-        val horizontal = activeProjectionRange(colProjection, minLength = (width * 0.28f).roundToInt()) ?: return null
-        val vertical = activeProjectionRange(rowProjection, minLength = (height * 0.28f).roundToInt()) ?: return null
-        val detectedWidth = horizontal.second - horizontal.first + 1
-        val detectedHeight = vertical.second - vertical.first + 1
-        val sampleAreaRatio = detectedWidth.toFloat() * detectedHeight.toFloat() / (width.toFloat() * height.toFloat()).coerceAtLeast(1f)
-        val sampleAspect = detectedWidth.toFloat() / detectedHeight.toFloat().coerceAtLeast(1f)
-        if (sampleAreaRatio !in 0.18f..0.985f || sampleAspect !in 0.24f..4.20f) {
-            if (sampled !== source && !sampled.isRecycled) runCatching { sampled.recycle() }
-            return null
-        }
-
-        // Auto-crop is deliberately conservative: projection bounds are expanded outward so
-        // page/book edges are kept even when edge contrast is strong or the detector is slightly tight.
-        val marginX = max(8, (width * 0.04f).roundToInt())
-        val marginY = max(8, (height * 0.04f).roundToInt())
-        val sx = source.width.toFloat() / width.toFloat()
-        val sy = source.height.toFloat() / height.toFloat()
-        val left = ((horizontal.first - marginX).coerceAtLeast(0) * sx)
-        val top = ((vertical.first - marginY).coerceAtLeast(0) * sy)
-        val right = ((horizontal.second + marginX).coerceAtMost(width - 1) * sx)
-        val bottom = ((vertical.second + marginY).coerceAtMost(height - 1) * sy)
-        if (sampled !== source && !sampled.isRecycled) runCatching { sampled.recycle() }
-        val boxWidth = right - left
-        val boxHeight = bottom - top
-        val areaRatio = (boxWidth * boxHeight) / (source.width.toFloat() * source.height.toFloat()).coerceAtLeast(1f)
-        val aspect = boxWidth / boxHeight.coerceAtLeast(1f)
-        return if (areaRatio in 0.18f..0.985f && aspect in 0.24f..4.20f) RectF(left, top, right, bottom) else null
-    }
 
     private fun isValidDocumentPolygon(points: List<Offset>, maxWidth: Int, maxHeight: Int): Boolean {
-        if (points.size != 4 || maxWidth <= 0 || maxHeight <= 0) return false
-        val area = abs(
-            points.indices.sumOf { i ->
-                val a = points[i]
-                val b = points[(i + 1) % points.size]
-                (a.x * b.y - b.x * a.y).toDouble()
-            }.toFloat()
-        ) / 2f
-        val imageArea = maxWidth.toFloat() * maxHeight.toFloat()
-        val areaRatio = area / imageArea.coerceAtLeast(1f)
-        val topWidth = distance(points[0], points[1])
-        val bottomWidth = distance(points[3], points[2])
-        val leftHeight = distance(points[0], points[3])
-        val rightHeight = distance(points[1], points[2])
-        val aspect = max(topWidth, bottomWidth) / max(leftHeight, rightHeight).coerceAtLeast(1f)
-
-        // Reject crossed, tiny, or extreme polygons and fall back to the original/default frame.
-        return areaRatio in 0.12f..0.99f &&
-            aspect in 0.20f..5.00f &&
-            points[0].x < points[1].x &&
-            points[3].x < points[2].x &&
-            points[0].y < points[3].y &&
-            points[1].y < points[2].y
-    }
+            if (points.size != 4 || maxWidth <= 0 || maxHeight <= 0) return false
+            if (points.any { it.x !in 0f..maxWidth.toFloat() || it.y !in 0f..maxHeight.toFloat() }) return false
+            if (segmentsIntersect(points[0], points[1], points[2], points[3])) return false
+            if (segmentsIntersect(points[1], points[2], points[3], points[0])) return false
+    
+            val area = abs(
+                points.indices.sumOf { i ->
+                    val a = points[i]
+                    val b = points[(i + 1) % points.size]
+                    (a.x * b.y - b.x * a.y).toDouble()
+                }.toFloat()
+            ) / 2f
+            val imageArea = maxWidth.toFloat() * maxHeight.toFloat()
+            val areaRatio = area / imageArea.coerceAtLeast(1f)
+            val topWidth = distance(points[0], points[1])
+            val bottomWidth = distance(points[3], points[2])
+            val leftHeight = distance(points[0], points[3])
+            val rightHeight = distance(points[1], points[2])
+            val minSide = min(min(topWidth, bottomWidth), min(leftHeight, rightHeight))
+            val aspect = max(topWidth, bottomWidth) / max(leftHeight, rightHeight).coerceAtLeast(1f)
+    
+            // Reject crossed, tiny, unstable, or extreme polygons and fall back safely.
+            return areaRatio in 0.12f..0.99f &&
+                aspect in 0.20f..5.00f &&
+                minSide >= min(maxWidth, maxHeight) * 0.12f &&
+                points[0].x < points[1].x &&
+                points[3].x < points[2].x &&
+                points[0].y < points[3].y &&
+                points[1].y < points[2].y
+        }
+    
+        private fun segmentsIntersect(a: Offset, b: Offset, c: Offset, d: Offset): Boolean {
+            fun orientation(p: Offset, q: Offset, r: Offset): Float {
+                return (q.y - p.y) * (r.x - q.x) - (q.x - p.x) * (r.y - q.y)
+            }
+            val o1 = orientation(a, b, c)
+            val o2 = orientation(a, b, d)
+            val o3 = orientation(c, d, a)
+            val o4 = orientation(c, d, b)
+            return o1 * o2 < 0f && o3 * o4 < 0f
+        }
 
     private fun activeProjectionRange(values: IntArray, minLength: Int): Pair<Int, Int>? {
-        if (values.isEmpty()) return null
-        val smoothed = IntArray(values.size)
-        for (i in values.indices) {
-            var sum = 0
-            var count = 0
-            for (j in i - 4..i + 4) {
-                if (j in values.indices) {
-                    sum += values[j]
-                    count += 1
+            if (values.isEmpty()) return null
+            val radius = max(3, values.size / 180).coerceAtMost(9)
+            val smoothed = IntArray(values.size)
+            for (i in values.indices) {
+                var sum = 0
+                var count = 0
+                for (j in i - radius..i + radius) {
+                    if (j in values.indices) {
+                        sum += values[j]
+                        count += 1
+                    }
                 }
+                smoothed[i] = if (count == 0) values[i] else sum / count
             }
-            smoothed[i] = if (count == 0) values[i] else sum / count
-        }
-        val peak = smoothed.maxOrNull() ?: return null
-        if (peak <= 0) return null
-        val threshold = max(2, (peak * 0.11f).roundToInt())
-        var bestStart = -1
-        var bestEnd = -1
-        var bestScore = Int.MIN_VALUE
-        var start = -1
-        var gap = 0
-        fun commit(endExclusive: Int) {
-            if (start < 0) return
-            val end = (endExclusive - gap - 1).coerceAtLeast(start)
-            val length = end - start + 1
-            if (length >= minLength) {
-                val score = (start..end).sumOf { smoothed[it] } + length * 6
-                if (score > bestScore) {
-                    bestScore = score
-                    bestStart = start
-                    bestEnd = end
+            val peak = smoothed.maxOrNull() ?: return null
+            if (peak <= 0) return null
+            val sorted = smoothed.copyOf().also { it.sort() }
+            val noiseFloor = sorted.percentile(0.55f)
+            val threshold = max(noiseFloor + 1, (peak * 0.14f).roundToInt()).coerceAtLeast(2)
+            var bestStart = -1
+            var bestEnd = -1
+            var bestScore = Int.MIN_VALUE
+            var start = -1
+            var gap = 0
+            val maxGap = max(6, values.size / 90).coerceAtMost(14)
+    
+            fun commit(endExclusive: Int) {
+                if (start < 0) return
+                val end = (endExclusive - gap - 1).coerceAtLeast(start)
+                val length = end - start + 1
+                if (length >= minLength) {
+                    val score = (start..end).sumOf { smoothed[it] } + length * 7
+                    if (score > bestScore) {
+                        bestScore = score
+                        bestStart = start
+                        bestEnd = end
+                    }
                 }
-            }
-            start = -1
-            gap = 0
-        }
-        for (i in smoothed.indices) {
-            if (smoothed[i] >= threshold) {
-                if (start < 0) start = i
+                start = -1
                 gap = 0
-            } else if (start >= 0) {
-                gap += 1
-                if (gap > 8) commit(i + 1)
             }
+            for (i in smoothed.indices) {
+                if (smoothed[i] >= threshold) {
+                    if (start < 0) start = i
+                    gap = 0
+                } else if (start >= 0) {
+                    gap += 1
+                    if (gap > maxGap) commit(i + 1)
+                }
+            }
+            commit(smoothed.size)
+            return if (bestStart >= 0 && bestEnd > bestStart) bestStart to bestEnd else null
         }
-        commit(smoothed.size)
-        return if (bestStart >= 0 && bestEnd > bestStart) bestStart to bestEnd else null
-    }
 
     private fun cleanDocumentBitmap(source: Bitmap, preserveColor: Boolean): Bitmap {
         val width = source.width
