@@ -275,18 +275,33 @@ object PdfExporter {
     }
     private fun Canvas.drawInvisibleOcrLayer(bitmap: Bitmap, pageWidthPx: Int, pageHeightPx: Int, ocrBlocks: List<Pair<Rect, String>>) {
         if (ocrBlocks.isEmpty() || bitmap.width <= 0 || bitmap.height <= 0) return
+        val imageRatio = bitmap.width.toFloat() / bitmap.height.toFloat().coerceAtLeast(1f)
+        val pageRatio = pageWidthPx.toFloat() / pageHeightPx.toFloat().coerceAtLeast(1f)
+        val targetWidth: Float
+        val targetHeight: Float
+        if (imageRatio > pageRatio) {
+            targetWidth = pageWidthPx.toFloat()
+            targetHeight = pageWidthPx / imageRatio
+        } else {
+            targetHeight = pageHeightPx.toFloat()
+            targetWidth = pageHeightPx * imageRatio
+        }
+        val leftOffset = (pageWidthPx - targetWidth) / 2f
+        val topOffset = (pageHeightPx - targetHeight) / 2f
         val textPaint = Paint().apply {
             color = Color.TRANSPARENT
             alpha = 1
-            textSize = 10f * (pageWidthPx / bitmap.width.toFloat())
+            textSize = 10f * (targetWidth / bitmap.width.toFloat())
             isAntiAlias = false
         }
-        val sx = pageWidthPx.toFloat() / bitmap.width
-        val sy = pageHeightPx.toFloat() / bitmap.height
-        ocrBlocks.forEach { (rect, text) ->
-            val safeText = text.ifBlank { " " }
-            drawText(safeText, rect.left * sx, rect.bottom * sy, textPaint)
-        }
+        val sx = targetWidth / bitmap.width
+        val sy = targetHeight / bitmap.height
+        ocrBlocks
+            .sortedWith(compareBy<Pair<Rect, String>> { it.first.top }.thenBy { it.first.left })
+            .forEach { (rect, text) ->
+                val safeText = text.ifBlank { " " }
+                drawText(safeText, leftOffset + rect.left * sx, topOffset + rect.bottom * sy, textPaint)
+            }
     }
 
 

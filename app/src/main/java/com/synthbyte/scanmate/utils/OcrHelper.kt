@@ -61,9 +61,9 @@ object OcrHelper {
         return suspendCancellableCoroutine { continuation ->
             getRecognizer().process(InputImage.fromBitmap(fixed, 0))
                 .addOnSuccessListener { result ->
-                    val rects = result.textBlocks.flatMap { block ->
-                        block.lines.map { line -> line.boundingBox to line.text }
-                    }.mapNotNull { (rect, text) -> rect?.let { Pair(it, text) } }
+                    val rects = orderedOcrLines(result.textBlocks)
+                        .map { line -> line.rect to postProcessOcrText(line.text) }
+                        .filter { (_, text) -> text.isNotBlank() }
                     recycleBitmaps()
                     if (continuation.isActive) continuation.resume(rects)
                 }
@@ -103,7 +103,7 @@ object OcrHelper {
     fun buildStats(text: String): OcrExtractionResult = buildStats(text, null)
 
     private fun buildStats(text: String, mlKitConfidence: Int?): OcrExtractionResult {
-        val clean = DocumentIntelligence.cleanOcrText(text)
+        val clean = DocumentIntelligence.cleanOcrText(postProcessOcrText(text))
         val words = clean.split(Regex("\\s+")).filter { it.isNotBlank() }
         val confidence = when {
             clean.isBlank() || clean.startsWith("OCR failed", ignoreCase = true) -> 0
@@ -151,50 +151,110 @@ object OcrHelper {
 
     private fun reconstructParagraphs(blocks: List<com.google.mlkit.vision.text.Text.TextBlock>): String {
         if (blocks.isEmpty()) return ""
-        val lines = blocks
-            .flatMap { block -> block.lines }
-            .mapNotNull { line ->
-                val box = line.boundingBox ?: return@mapNotNull null
-                val clean = line.text.trim().replace(Regex("\\s+"), " ")
-                if (clean.isBlank()) null else OcrLine(box, clean)
-            }
-            .sortedWith(compareBy<OcrLine> { it.rect.top }.thenBy { it.rect.left })
+        val lines = orderedOcrLines(blocks)
         if (lines.isEmpty()) return blocks.joinToString("\n") { it.text }.trim()
 
         val medianHeight = lines.map { it.rect.height().coerceAtLeast(1) }.sorted().let { values -> values[values.size / 2].coerceAtLeast(1) }
-        val paragraphs = mutableListOf<MutableList<OcrLine>>()
-        var current = mutableListOf<OcrLine>()
-        var lastBottom = lines.first().rect.bottom
-        for (line in lines) {
-            val gap = line.rect.top - lastBottom
-            if (current.isNotEmpty() && gap > medianHeight * 1.35f) {
-                paragraphs += current
-                current = mutableListOf()
-            }
-            current += line
-            lastBottom = max(lastBottom, line.rect.bottom)
-        }
-        if (current.isNotEmpty()) paragraphs += current
+        val rows = groupLinesIntoRows(lines, medianHeight)
+        if (rows.isEmpty()) return ""
 
-        return paragraphs.joinToString("\n\n") { paragraph ->
-            paragraph
-                .sortedWith(compareBy<OcrLine> { it.rect.top }.thenBy { it.rect.left })
-                .joinToString("\n") { it.text }
+        val paragraphs = mutableListOf<MutableList<String>>()
+        var currentParagraph = mutableListOf<String>()
+        var lastBottom = rows.first().maxOf { it.rect.bottom }
+        for (row in rows) {
+            val rowTop = row.minOf { it.rect.top }
+            val rowBottom = row.maxOf { it.rect.bottom }
+            val gap = rowTop - lastBottom
+            if (currentParagraph.isNotEmpty() && gap > medianHeight * 1.55f) {
+                paragraphs += currentParagraph
+                currentParagraph = mutableListOf()
+            }
+            val rowText = row.sortedBy { it.rect.left }
+                .joinToString(" ") { it.text }
                 .replace(Regex("[ \t]{2,}"), " ")
                 .trim()
-        }.trim()
+            if (rowText.isNotBlank()) currentParagraph += rowText
+            lastBottom = max(lastBottom, rowBottom)
+        }
+        if (currentParagraph.isNotEmpty()) paragraphs += currentParagraph
+
+        return postProcessOcrText(
+            paragraphs.joinToString("\n\n") { paragraph ->
+                paragraph.joinToString("\n").trim()
+            }
+        ).trim()
     }
 
-    private data class OcrLine(val rect: Rect, val text: String)
+    private data class OcrLine(val rect: Rect, val text: String, val blockIndex: Int)
 
     private fun Text.toSortedText(): String {
-        return textBlocks
-            .sortedWith(compareBy<Text.TextBlock> { it.boundingBox?.top ?: Int.MAX_VALUE }.thenBy { it.boundingBox?.left ?: Int.MAX_VALUE })
-            .joinToString("\n") { block ->
-                block.lines
-                    .sortedWith(compareBy<Text.Line> { it.boundingBox?.top ?: Int.MAX_VALUE }.thenBy { it.boundingBox?.left ?: Int.MAX_VALUE })
-                    .joinToString("\n") { line -> line.text }
+        return reconstructParagraphs(textBlocks)
+    }
+
+    private fun orderedOcrLines(blocks: List<Text.TextBlock>): List<OcrLine> {
+        val lines = blocks.flatMapIndexed { blockIndex, block ->
+            val blockRect = block.boundingBox
+            block.lines.mapNotNull { line ->
+                val clean = postProcessOcrText(line.text.trim().replace(Regex("\\s+"), " "))
+                if (clean.isBlank()) return@mapNotNull null
+                val lineRect = line.boundingBox ?: line.elements
+                    .mapNotNull { it.boundingBox }
+                    .takeIf { it.isNotEmpty() }
+                    ?.reduce { acc, rect -> union(acc, rect) }
+                    ?: blockRect
+                    ?: return@mapNotNull null
+                OcrLine(lineRect, clean, blockIndex)
             }
+        }
+        if (lines.isEmpty()) return emptyList()
+        val medianHeight = lines.map { it.rect.height().coerceAtLeast(1) }
+            .sorted()
+            .let { values -> values[values.size / 2].coerceAtLeast(1) }
+        return groupLinesIntoRows(lines, medianHeight)
+            .flatMap { row -> row.sortedWith(compareBy<OcrLine> { it.rect.left }.thenBy { it.blockIndex }) }
+    }
+
+    private fun groupLinesIntoRows(lines: List<OcrLine>, medianHeight: Int): List<List<OcrLine>> {
+        if (lines.isEmpty()) return emptyList()
+        val rowTolerance = max(6, (medianHeight * 0.65f).roundToInt())
+        val rows = mutableListOf<MutableList<OcrLine>>()
+        lines.sortedWith(compareBy<OcrLine> { it.rect.centerY() }.thenBy { it.rect.left }).forEach { line ->
+            val centerY = line.rect.centerY()
+            val row = rows.firstOrNull { existing ->
+                val averageCenter = existing.map { it.rect.centerY() }.average()
+                abs(centerY - averageCenter) <= rowTolerance
+            }
+            if (row == null) {
+                rows += mutableListOf(line)
+            } else {
+                row += line
+            }
+        }
+        return rows.sortedWith(
+            compareBy<List<OcrLine>> { row -> row.minOf { it.rect.top } }
+                .thenBy { row -> row.minOf { it.rect.left } }
+        )
+    }
+
+    private fun union(a: Rect, b: Rect): Rect = Rect(
+        min(a.left, b.left),
+        min(a.top, b.top),
+        max(a.right, b.right),
+        max(a.bottom, b.bottom)
+    )
+
+    private fun postProcessOcrText(value: String): String {
+        if (value.isBlank()) return ""
+        return value
+            .replace(Regex("[ \t]{2,}"), " ")
+            .replace(Regex("(?i)\\b([a-z0-9._%+-]+)\\s*@\\s*([a-z0-9.-]+)\\s*\\.\\s*([a-z]{2,})\\b")) { match ->
+                "${match.groupValues[1]}@${match.groupValues[2]}.${match.groupValues[3]}"
+            }
+            .replace(Regex("(?i)\\b([a-z0-9-]+(?:\\s*\\.\\s*[a-z0-9-]+)+)\\s*\\.\\s*([a-z]{2,})\\b")) { match ->
+                "${match.groupValues[1].replace(Regex("\\s*\\.\\s*"), ".")}.${match.groupValues[2]}"
+            }
+            .replace(Regex("(?i)\\b(https?)\\s*:\\s*/\\s*/\\s*")) { match -> "${match.groupValues[1].lowercase()}://" }
+            .replace(Regex("(?i)\\b(www)\\s*\\.\\s*")) { "www." }
             .trim()
     }
 
@@ -370,15 +430,30 @@ object OcrHelper {
     }
 
     private fun fixExifRotation(bitmap: Bitmap, file: File): Bitmap {
-        val degrees = runCatching {
-            when (ExifInterface(file.absolutePath).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)) {
-                ExifInterface.ORIENTATION_ROTATE_90 -> 90f
-                ExifInterface.ORIENTATION_ROTATE_180 -> 180f
-                ExifInterface.ORIENTATION_ROTATE_270 -> 270f
-                else -> 0f
+        val orientation = runCatching {
+            ExifInterface(file.absolutePath).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+        }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
+        val matrix = Matrix()
+        when (orientation) {
+            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.preScale(-1f, 1f)
+            ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+            ExifInterface.ORIENTATION_FLIP_VERTICAL -> {
+                matrix.postRotate(180f)
+                matrix.postScale(-1f, 1f)
             }
-        }.getOrDefault(0f)
-        return if (degrees == 0f) bitmap else rotate(bitmap, degrees)
+            ExifInterface.ORIENTATION_TRANSPOSE -> {
+                matrix.postRotate(90f)
+                matrix.postScale(-1f, 1f)
+            }
+            ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+            ExifInterface.ORIENTATION_TRANSVERSE -> {
+                matrix.postRotate(270f)
+                matrix.postScale(-1f, 1f)
+            }
+            ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+            else -> return bitmap
+        }
+        return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
     }
 
     private fun rotate(source: Bitmap, degrees: Float): Bitmap {

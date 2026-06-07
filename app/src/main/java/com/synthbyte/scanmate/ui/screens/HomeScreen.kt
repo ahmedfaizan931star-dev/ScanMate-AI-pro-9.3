@@ -33,7 +33,10 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -67,7 +70,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ListItem
-import androidx.compose.material3.SearchBar
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
@@ -200,51 +202,79 @@ fun HomeScreen(
             }
             item(key = "home_search") {
                 val results by viewModel.searchResults.collectAsState()
-                SearchBar(
-                    query = quickSearchQuery,
-                    onQueryChange = viewModel::setSearchQuery,
-                    onSearch = { viewModel.addToSearchHistory(it) },
-                    active = quickSearchQuery.isNotBlank(),
-                    onActiveChange = { if (!it) viewModel.setSearchQuery("") },
-                    placeholder = { Text("Search documents and text…") },
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+                val searchMatches = if (quickSearchQuery.isBlank()) documents else results
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .heightIn(max = 380.dp)
-                            .verticalScroll(rememberScrollState())
-                    ) {
-                        results.forEach { doc ->
-                            val sourceText = doc.ocrText.orEmpty()
-                            val snippet = sourceText.let { t ->
-                                val idx = t.indexOf(quickSearchQuery, ignoreCase = true).takeIf { it >= 0 } ?: 0
-                                t.substring(idx.coerceAtLeast(0), (idx + 80).coerceAtMost(t.length))
-                            }
-                            ListItem(
-                                headlineContent = { Text(doc.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                                supportingContent = {
-                                    val annotated = buildAnnotatedString {
-                                        val lower = snippet.lowercase()
-                                        val qLower = quickSearchQuery.lowercase()
-                                        var i = 0
-                                        while (i < snippet.length) {
-                                            val hit = if (qLower.isBlank()) -1 else lower.indexOf(qLower, i)
-                                            if (hit < 0) {
-                                                append(snippet.substring(i))
-                                                break
-                                            }
-                                            append(snippet.substring(i, hit))
-                                            withStyle(SpanStyle(background = MaterialTheme.colorScheme.primaryContainer)) {
-                                                append(snippet.substring(hit, hit + quickSearchQuery.length))
-                                            }
-                                            i = hit + quickSearchQuery.length
+                    OutlinedTextField(
+                        value = quickSearchQuery,
+                        onValueChange = viewModel::setSearchQuery,
+                        placeholder = { Text("Search documents and text") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp)
+                    )
+                    if (quickSearchQuery.isNotBlank() || searchMatches.isNotEmpty()) {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 320.dp)
+                                    .verticalScroll(rememberScrollState())
+                            ) {
+                                if (searchMatches.isEmpty()) {
+                                    Text(
+                                        "No documents found",
+                                        modifier = Modifier.padding(16.dp),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                } else {
+                                    searchMatches.take(8).forEach { doc ->
+                                        val sourceText = doc.ocrText.orEmpty()
+                                        val snippet = if (quickSearchQuery.isBlank()) {
+                                            sourceText.take(80).ifBlank { doc.workspace.ifBlank { "Inbox" } }
+                                        } else {
+                                            val idx = sourceText.indexOf(quickSearchQuery, ignoreCase = true).takeIf { it >= 0 } ?: 0
+                                            sourceText.substring(idx.coerceAtLeast(0), (idx + 80).coerceAtMost(sourceText.length))
+                                                .ifBlank { doc.workspace.ifBlank { "Inbox" } }
                                         }
+                                        ListItem(
+                                            headlineContent = { Text(doc.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                            supportingContent = {
+                                                val annotated = buildAnnotatedString {
+                                                    val lower = snippet.lowercase()
+                                                    val qLower = quickSearchQuery.lowercase()
+                                                    var i = 0
+                                                    while (i < snippet.length) {
+                                                        val hit = if (qLower.isBlank()) -1 else lower.indexOf(qLower, i)
+                                                        if (hit < 0) {
+                                                            append(snippet.substring(i))
+                                                            break
+                                                        }
+                                                        append(snippet.substring(i, hit))
+                                                        withStyle(SpanStyle(background = MaterialTheme.colorScheme.primaryContainer)) {
+                                                            append(snippet.substring(hit, hit + quickSearchQuery.length))
+                                                        }
+                                                        i = hit + quickSearchQuery.length
+                                                    }
+                                                }
+                                                Text(annotated, maxLines = 2)
+                                            },
+                                            modifier = Modifier.clickable {
+                                                viewModel.addToSearchHistory(quickSearchQuery)
+                                                onNavigateToDoc(doc.id)
+                                            }
+                                        )
+                                        HorizontalDivider()
                                     }
-                                    Text(annotated, maxLines = 2)
-                                },
-                                modifier = Modifier.clickable { onNavigateToDoc(doc.id) }
-                            )
-                            HorizontalDivider()
+                                }
+                            }
                         }
                     }
                 }

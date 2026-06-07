@@ -223,7 +223,8 @@ fun CameraScreen(
                                 if (bitmap == null) {
                                     qualityFile
                                 } else {
-                                    val filtered = FileUtils.applyFilter(bitmap, selectedFilter)
+                                    val upright = FileUtils.normalizeBitmapOrientation(bitmap, qualityFile)
+                                    val filtered = FileUtils.applyFilter(upright, selectedFilter)
                                     val saved = FileUtils.saveBitmapToFolder(
                                         context = context,
                                         bitmap = filtered,
@@ -233,6 +234,7 @@ fun CameraScreen(
                                         quality = quality.jpegQuality
                                     ) ?: qualityFile
                                     if (!bitmap.isRecycled) runCatching { bitmap.recycle() }
+                                    if (upright !== bitmap && !upright.isRecycled) runCatching { upright.recycle() }
                                     if (!filtered.isRecycled) runCatching { filtered.recycle() }
                                     saved
                                 }

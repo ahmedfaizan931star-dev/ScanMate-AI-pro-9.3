@@ -3,6 +3,7 @@ package com.synthbyte.scanmate
 import android.content.Context
 import android.graphics.Bitmap
 import androidx.test.core.app.ApplicationProvider
+import com.synthbyte.scanmate.utils.DocumentIntelligence
 import com.synthbyte.scanmate.utils.OcrHelper
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -52,6 +53,17 @@ class OcrHelperTest {
         val result = OcrHelper.extractBlocksFromFile(context, missing)
 
         assertTrue(result.isEmpty())
+    }
+
+    @Test
+    fun cleanOcrTextRepairsUrlAndEmailSpacingConservatively() {
+        val raw = "Visit itseries. com.pk or mail info @ example. com\n\nPreface"
+
+        val result = DocumentIntelligence.cleanOcrText(raw)
+
+        assertTrue(result.contains("itseries.com.pk"))
+        assertTrue(result.contains("info@example.com"))
+        assertTrue(result.endsWith("Preface"))
     }
 
     private fun invokeBitmapPrivate(methodName: String, source: Bitmap): Bitmap {

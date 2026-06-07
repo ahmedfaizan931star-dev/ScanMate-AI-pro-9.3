@@ -240,7 +240,7 @@ fun AiScreen(onNavigateBack: () -> Unit, settingsRepository: SettingsRepository)
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
-                            "Running fully offline on your device. Add a Gemini key in Settings for deeper AI.",
+                            "AI tools are optional. Add your API key in Settings for online Gemini, or keep using offline tools.",
                             modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
                             color = MaterialTheme.colorScheme.onSecondaryContainer,
                             style = MaterialTheme.typography.bodySmall,

@@ -16,14 +16,19 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -86,6 +91,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.synthbyte.scanmate.ui.viewmodels.PageEditorViewModel
 import com.synthbyte.scanmate.data.Page
@@ -95,6 +102,7 @@ import com.synthbyte.scanmate.utils.OcrHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -578,40 +586,83 @@ private fun ManualCropDialog(onDismiss: () -> Unit, onApply: (Float, Float, Floa
     var top by remember { mutableFloatStateOf(0.04f) }
     var right by remember { mutableFloatStateOf(0.04f) }
     var bottom by remember { mutableFloatStateOf(0.04f) }
+    var selectedPreset by remember { mutableStateOf("balanced") }
+    val presets = listOf(
+        CropPreset("wide", "Wide", 0.02f),
+        CropPreset("balanced", "Balanced", 0.05f),
+        CropPreset("tight", "Tight", 0.09f)
+    )
 
-    fun setPreset(value: Float) {
+    fun setPreset(preset: CropPreset) {
+        selectedPreset = preset.id
+        val value = preset.value
         left = value
         top = value
         right = value
         bottom = value
     }
 
-    AlertDialog(
+    Dialog(
         onDismissRequest = onDismiss,
-        title = { Text("Crop page") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(
-                    "Choose a crop style, then fine tune only if needed. For exact page corners, use the Corners tool.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodyMedium
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    OutlinedButton(onClick = { setPreset(0.02f) }, modifier = Modifier.weight(1f)) { Text("Wide") }
-                    OutlinedButton(onClick = { setPreset(0.05f) }, modifier = Modifier.weight(1f)) { Text("Balanced") }
-                    OutlinedButton(onClick = { setPreset(0.09f) }, modifier = Modifier.weight(1f)) { Text("Tight") }
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.88f)
+                .padding(16.dp)
+                .widthIn(max = 560.dp),
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                LazyColumn(
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("Crop page", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                            Text(
+                                "Choose a style, then fine tune the page edges.",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                    }
+                    item {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                            presets.forEach { preset ->
+                                FilterChip(
+                                    selected = selectedPreset == preset.id,
+                                    onClick = { setPreset(preset) },
+                                    label = { Text(preset.label, softWrap = false, maxLines = 1) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                    }
+                    item { CropSlider("Left edge", left) { left = it; selectedPreset = "custom" } }
+                    item { CropSlider("Top edge", top) { top = it; selectedPreset = "custom" } }
+                    item { CropSlider("Right edge", right) { right = it; selectedPreset = "custom" } }
+                    item { CropSlider("Bottom edge", bottom) { bottom = it; selectedPreset = "custom" } }
                 }
-                CropSlider("Left edge", left) { left = it }
-                CropSlider("Top edge", top) { top = it }
-                CropSlider("Right edge", right) { right = it }
-                CropSlider("Bottom edge", bottom) { bottom = it }
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 16.dp),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(onClick = onDismiss) { Text("Cancel") }
+                    Spacer(Modifier.size(8.dp))
+                    Button(onClick = { onApply(left, top, right, bottom) }) { Text("Apply crop") }
+                }
             }
-        },
-        confirmButton = { Button(onClick = { onApply(left, top, right, bottom) }) { Text("Apply crop") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
-    )
+        }
+    }
 }
 
+private data class CropPreset(val id: String, val label: String, val value: Float)
 
 @Composable
 private fun PerspectiveDialog(
@@ -619,26 +670,50 @@ private fun PerspectiveDialog(
     onDismiss: () -> Unit,
     onApply: (Float, Float, Float, Float, Float, Float, Float, Float) -> Unit
 ) {
-    var topLeft by remember { mutableStateOf(Offset(0.08f, 0.08f)) }
-    var topRight by remember { mutableStateOf(Offset(0.92f, 0.08f)) }
-    var bottomRight by remember { mutableStateOf(Offset(0.92f, 0.92f)) }
-    var bottomLeft by remember { mutableStateOf(Offset(0.08f, 0.92f)) }
+    val detectedCorners = listOf(
+        Offset(0.06f, 0.06f),
+        Offset(0.94f, 0.06f),
+        Offset(0.94f, 0.94f),
+        Offset(0.06f, 0.94f)
+    )
+    var corners by remember { mutableStateOf(detectedCorners) }
+    val isValid = remember(corners) { cornersAreValid(corners) }
 
-    AlertDialog(
+    Dialog(
         onDismissRequest = onDismiss,
-        title = { Text("Drag page corners") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Drag the four handles onto the real page corners. This replaces the old numeric perspective sliders.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.92f)
+                .padding(12.dp)
+                .widthIn(max = 680.dp),
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Column(modifier = Modifier.fillMaxSize().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Drag page corners", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text("Place each handle on the real document corner.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 BoxWithConstraints(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(360.dp)
-                        .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(16.dp))
-                        .padding(8.dp)
+                        .weight(1f)
+                        .heightIn(min = 280.dp)
+                        .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(18.dp))
+                        .padding(10.dp)
                 ) {
                     val boxWidth = constraints.maxWidth.toFloat().coerceAtLeast(1f)
                     val boxHeight = constraints.maxHeight.toFloat().coerceAtLeast(1f)
+                    val bitmapAspect = bitmap?.let { it.width.toFloat() / it.height.toFloat().coerceAtLeast(1f) } ?: 0.72f
+                    val boxAspect = boxWidth / boxHeight
+                    val imageWidth = if (bitmapAspect > boxAspect) boxWidth else boxHeight * bitmapAspect
+                    val imageHeight = if (bitmapAspect > boxAspect) boxWidth / bitmapAspect else boxHeight
+                    val imageLeft = (boxWidth - imageWidth) / 2f
+                    val imageTop = (boxHeight - imageHeight) / 2f
+
                     bitmap?.let {
                         Image(
                             bitmap = it.asImageBitmap(),
@@ -649,60 +724,98 @@ private fun PerspectiveDialog(
                     }
                     val handleColor = MaterialTheme.colorScheme.primary
                     val handleBorder = MaterialTheme.colorScheme.surface
+                    val guideColor = MaterialTheme.colorScheme.primary
                     Canvas(modifier = Modifier.fillMaxSize()) {
-                        val points = listOf(topLeft, topRight, bottomRight, bottomLeft).map { Offset(it.x * size.width, it.y * size.height) }
-                        drawLine(handleBorder, points[0], points[1], strokeWidth = 3f)
-                        drawLine(handleBorder, points[1], points[2], strokeWidth = 3f)
-                        drawLine(handleBorder, points[2], points[3], strokeWidth = 3f)
-                        drawLine(handleBorder, points[3], points[0], strokeWidth = 3f)
+                        val points = corners.map { point ->
+                            Offset(imageLeft + point.x * imageWidth, imageTop + point.y * imageHeight)
+                        }
+                        drawLine(guideColor, points[0], points[1], strokeWidth = 4f)
+                        drawLine(guideColor, points[1], points[2], strokeWidth = 4f)
+                        drawLine(guideColor, points[2], points[3], strokeWidth = 4f)
+                        drawLine(guideColor, points[3], points[0], strokeWidth = 4f)
                         points.forEach { point ->
-                            drawCircle(handleBorder, radius = 18f, center = point)
-                            drawCircle(handleColor, radius = 15f, center = point)
-                            drawCircle(handleBorder, radius = 15f, center = point, style = Stroke(width = 3f))
+                            drawCircle(handleBorder, radius = 24f, center = point)
+                            drawCircle(handleColor, radius = 18f, center = point)
+                            drawCircle(handleBorder, radius = 18f, center = point, style = Stroke(width = 4f))
                         }
                     }
-                    CornerHandle(topLeft, boxWidth, boxHeight) { topLeft = it }
-                    CornerHandle(topRight, boxWidth, boxHeight) { topRight = it }
-                    CornerHandle(bottomRight, boxWidth, boxHeight) { bottomRight = it }
-                    CornerHandle(bottomLeft, boxWidth, boxHeight) { bottomLeft = it }
+                    corners.forEachIndexed { index, point ->
+                        CornerHandle(
+                            position = point,
+                            imageLeft = imageLeft,
+                            imageTop = imageTop,
+                            imageWidth = imageWidth,
+                            imageHeight = imageHeight
+                        ) { next ->
+                            corners = corners.updateCorner(index, next)
+                        }
+                    }
+                }
+                if (!isValid) {
+                    Text(
+                        "Move the handles apart so the page outline does not cross.",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(onClick = { corners = detectedCorners }) { Text("Reset") }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = onDismiss) { Text("Cancel") }
+                        Button(
+                            enabled = isValid && bitmap != null,
+                            onClick = {
+                                val topLeft = corners[0]
+                                val topRight = corners[1]
+                                val bottomRight = corners[2]
+                                val bottomLeft = corners[3]
+                                onApply(
+                                    topLeft.x,
+                                    topLeft.y,
+                                    1f - topRight.x,
+                                    topRight.y,
+                                    1f - bottomRight.x,
+                                    1f - bottomRight.y,
+                                    bottomLeft.x,
+                                    1f - bottomLeft.y
+                                )
+                            }
+                        ) { Text("Apply") }
+                    }
                 }
             }
-        },
-        confirmButton = {
-            Button(onClick = {
-                onApply(
-                    topLeft.x,
-                    topLeft.y,
-                    1f - topRight.x,
-                    topRight.y,
-                    1f - bottomRight.x,
-                    1f - bottomRight.y,
-                    bottomLeft.x,
-                    1f - bottomLeft.y
-                )
-            }) { Text("Apply") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
-    )
+        }
+    }
 }
 
 @Composable
-private fun CornerHandle(position: Offset, boxWidth: Float, boxHeight: Float, onMove: (Offset) -> Unit) {
+private fun CornerHandle(
+    position: Offset,
+    imageLeft: Float,
+    imageTop: Float,
+    imageWidth: Float,
+    imageHeight: Float,
+    onMove: (Offset) -> Unit
+) {
     Box(
         modifier = Modifier
             .offset {
                 IntOffset(
-                    (position.x * boxWidth).roundToInt() - 24,
-                    (position.y * boxHeight).roundToInt() - 24
+                    (imageLeft + position.x * imageWidth).roundToInt() - 28,
+                    (imageTop + position.y * imageHeight).roundToInt() - 28
                 )
             }
-            .size(48.dp)
+            .size(56.dp)
             .pointerInput(position) {
                 detectDragGestures { change, dragAmount ->
                     change.consume()
                     val next = Offset(
-                        (position.x + dragAmount.x / boxWidth).coerceIn(0.02f, 0.98f),
-                        (position.y + dragAmount.y / boxHeight).coerceIn(0.02f, 0.98f)
+                        (position.x + dragAmount.x / imageWidth.coerceAtLeast(1f)).coerceIn(0.02f, 0.98f),
+                        (position.y + dragAmount.y / imageHeight.coerceAtLeast(1f)).coerceIn(0.02f, 0.98f)
                     )
                     onMove(next)
                 }
@@ -712,12 +825,52 @@ private fun CornerHandle(position: Offset, boxWidth: Float, boxHeight: Float, on
 
 @Composable
 private fun CropSlider(label: String, value: Float, onChange: (Float) -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text(label, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(label, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+            Text("${(value * 100f).roundToInt()}%", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         Slider(value = value, onValueChange = onChange, valueRange = 0f..0.22f)
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text("Keep more", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text("Trim more", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
+}
+
+private fun List<Offset>.updateCorner(index: Int, next: Offset): List<Offset> {
+    val minGap = 0.08f
+    fun Float.inRange(min: Float, max: Float): Float {
+        val low = min.coerceIn(0.02f, 0.98f)
+        val high = max.coerceIn(0.02f, 0.98f)
+        return if (low <= high) coerceIn(low, high) else ((low + high) / 2f).coerceIn(0.02f, 0.98f)
+    }
+    val tl = this[0]
+    val tr = this[1]
+    val br = this[2]
+    val bl = this[3]
+    val clamped = when (index) {
+        0 -> Offset(next.x.inRange(0.02f, minOf(tr.x, br.x) - minGap), next.y.inRange(0.02f, minOf(bl.y, br.y) - minGap))
+        1 -> Offset(next.x.inRange(maxOf(tl.x, bl.x) + minGap, 0.98f), next.y.inRange(0.02f, minOf(bl.y, br.y) - minGap))
+        2 -> Offset(next.x.inRange(maxOf(tl.x, bl.x) + minGap, 0.98f), next.y.inRange(maxOf(tl.y, tr.y) + minGap, 0.98f))
+        3 -> Offset(next.x.inRange(0.02f, minOf(tr.x, br.x) - minGap), next.y.inRange(maxOf(tl.y, tr.y) + minGap, 0.98f))
+        else -> next
+    }
+    return toMutableList().also { it[index] = clamped }
+}
+
+private fun cornersAreValid(corners: List<Offset>): Boolean {
+    if (corners.size != 4) return false
+    val area = abs(
+        corners.indices.sumOf { i ->
+            val a = corners[i]
+            val b = corners[(i + 1) % corners.size]
+            (a.x * b.y - b.x * a.y).toDouble()
+        }.toFloat()
+    ) / 2f
+    return area >= 0.12f &&
+        corners[0].x < corners[1].x &&
+        corners[3].x < corners[2].x &&
+        corners[0].y < corners[3].y &&
+        corners[1].y < corners[2].y
 }

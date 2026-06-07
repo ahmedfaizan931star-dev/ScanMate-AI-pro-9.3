@@ -39,7 +39,8 @@ class CameraViewModel @Inject constructor(
     }
 
     suspend fun sharpenCapturedImageFile(photoFile: File): File = withContext(Dispatchers.IO) {
-        val bitmap = BitmapFactory.decodeFile(photoFile.absolutePath) ?: return@withContext photoFile
+        val decoded = BitmapFactory.decodeFile(photoFile.absolutePath) ?: return@withContext photoFile
+        val bitmap = ImageProcessor.normalizeBitmapOrientation(decoded, photoFile)
         val sharpened = runCatching { ImageProcessor.applyFilter(bitmap, FilterType.SHARPEN) }
             .getOrDefault(bitmap)
         _previewBitmap.value = sharpened.copy(Bitmap.Config.ARGB_8888, false)
@@ -47,7 +48,8 @@ class CameraViewModel @Inject constructor(
             sharpened.compress(Bitmap.CompressFormat.JPEG, 100, output)
         }
         if (sharpened !== bitmap && !sharpened.isRecycled) sharpened.recycle()
-        if (!bitmap.isRecycled) bitmap.recycle()
+        if (bitmap !== decoded && !bitmap.isRecycled) bitmap.recycle()
+        if (!decoded.isRecycled) decoded.recycle()
         photoFile
     }
 

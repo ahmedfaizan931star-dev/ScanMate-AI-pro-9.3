@@ -11,6 +11,7 @@ import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Typeface
+import android.media.ExifInterface
 import androidx.compose.ui.geometry.Offset
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -26,6 +27,33 @@ import kotlin.math.sqrt
 val ImageProcessingDispatcher = Dispatchers.Default.limitedParallelism(2)
 
 object ImageProcessor {
+    fun normalizeBitmapOrientation(source: Bitmap, file: File): Bitmap {
+        val orientation = runCatching {
+            ExifInterface(file.absolutePath).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+        }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
+        val matrix = Matrix()
+        when (orientation) {
+            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.preScale(-1f, 1f)
+            ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+            ExifInterface.ORIENTATION_FLIP_VERTICAL -> {
+                matrix.postRotate(180f)
+                matrix.postScale(-1f, 1f)
+            }
+            ExifInterface.ORIENTATION_TRANSPOSE -> {
+                matrix.postRotate(90f)
+                matrix.postScale(-1f, 1f)
+            }
+            ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+            ExifInterface.ORIENTATION_TRANSVERSE -> {
+                matrix.postRotate(270f)
+                matrix.postScale(-1f, 1f)
+            }
+            ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+            else -> return source
+        }
+        return Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
+    }
+
     suspend fun saveEditedBitmap(context: Context, bitmap: Bitmap, sourceName: String = "EDITED"): File? {
         val name = "${sourceName}_${System.currentTimeMillis()}"
         return FileUtils.saveBitmapToFolder(context, bitmap, "Scans", name, Bitmap.CompressFormat.JPEG, 94)
@@ -95,6 +123,10 @@ object ImageProcessor {
         }
 
         val ordered = orderDocumentCorners(corners.map(::mappedPoint), bitmap.width, bitmap.height)
+        if (!isValidDocumentPolygon(ordered, bitmap.width, bitmap.height)) {
+            bitmap.recycle()
+            return null
+        }
         val warped = perspectiveWarp(bitmap, ordered) ?: run {
             bitmap.recycle()
             return null
@@ -180,7 +212,9 @@ object ImageProcessor {
             Offset(w - bottomRightX.coerceIn(0f, 0.45f) * w, h - bottomRightY.coerceIn(0f, 0.45f) * h),
             Offset(bottomLeftX.coerceIn(0f, 0.45f) * w, h - bottomLeftY.coerceIn(0f, 0.45f) * h)
         )
-        val warped = perspectiveWarp(source, orderDocumentCorners(points, source.width, source.height))
+        val ordered = orderDocumentCorners(points, source.width, source.height)
+        if (!isValidDocumentPolygon(ordered, source.width, source.height)) return source.copy(Bitmap.Config.ARGB_8888, false)
+        val warped = perspectiveWarp(source, ordered)
             ?: return source.copy(Bitmap.Config.ARGB_8888, false)
         return cleanDocumentBitmap(warped, preserveColor = true).also { cleaned ->
             if (cleaned !== warped && !warped.isRecycled) runCatching { warped.recycle() }
@@ -274,8 +308,19 @@ object ImageProcessor {
 
         val horizontal = activeProjectionRange(colProjection, minLength = (width * 0.28f).roundToInt()) ?: return null
         val vertical = activeProjectionRange(rowProjection, minLength = (height * 0.28f).roundToInt()) ?: return null
-        val marginX = max(4, (width * 0.018f).roundToInt())
-        val marginY = max(4, (height * 0.018f).roundToInt())
+        val detectedWidth = horizontal.second - horizontal.first + 1
+        val detectedHeight = vertical.second - vertical.first + 1
+        val sampleAreaRatio = detectedWidth.toFloat() * detectedHeight.toFloat() / (width.toFloat() * height.toFloat()).coerceAtLeast(1f)
+        val sampleAspect = detectedWidth.toFloat() / detectedHeight.toFloat().coerceAtLeast(1f)
+        if (sampleAreaRatio !in 0.18f..0.985f || sampleAspect !in 0.24f..4.20f) {
+            if (sampled !== source && !sampled.isRecycled) runCatching { sampled.recycle() }
+            return null
+        }
+
+        // Auto-crop is deliberately conservative: projection bounds are expanded outward so
+        // page/book edges are kept even when edge contrast is strong or the detector is slightly tight.
+        val marginX = max(8, (width * 0.04f).roundToInt())
+        val marginY = max(8, (height * 0.04f).roundToInt())
         val sx = source.width.toFloat() / width.toFloat()
         val sy = source.height.toFloat() / height.toFloat()
         val left = ((horizontal.first - marginX).coerceAtLeast(0) * sx)
@@ -286,7 +331,34 @@ object ImageProcessor {
         val boxWidth = right - left
         val boxHeight = bottom - top
         val areaRatio = (boxWidth * boxHeight) / (source.width.toFloat() * source.height.toFloat()).coerceAtLeast(1f)
-        return if (areaRatio in 0.10f..0.98f) RectF(left, top, right, bottom) else null
+        val aspect = boxWidth / boxHeight.coerceAtLeast(1f)
+        return if (areaRatio in 0.18f..0.985f && aspect in 0.24f..4.20f) RectF(left, top, right, bottom) else null
+    }
+
+    private fun isValidDocumentPolygon(points: List<Offset>, maxWidth: Int, maxHeight: Int): Boolean {
+        if (points.size != 4 || maxWidth <= 0 || maxHeight <= 0) return false
+        val area = abs(
+            points.indices.sumOf { i ->
+                val a = points[i]
+                val b = points[(i + 1) % points.size]
+                (a.x * b.y - b.x * a.y).toDouble()
+            }.toFloat()
+        ) / 2f
+        val imageArea = maxWidth.toFloat() * maxHeight.toFloat()
+        val areaRatio = area / imageArea.coerceAtLeast(1f)
+        val topWidth = distance(points[0], points[1])
+        val bottomWidth = distance(points[3], points[2])
+        val leftHeight = distance(points[0], points[3])
+        val rightHeight = distance(points[1], points[2])
+        val aspect = max(topWidth, bottomWidth) / max(leftHeight, rightHeight).coerceAtLeast(1f)
+
+        // Reject crossed, tiny, or extreme polygons and fall back to the original/default frame.
+        return areaRatio in 0.12f..0.99f &&
+            aspect in 0.20f..5.00f &&
+            points[0].x < points[1].x &&
+            points[3].x < points[2].x &&
+            points[0].y < points[3].y &&
+            points[1].y < points[2].y
     }
 
     private fun activeProjectionRange(values: IntArray, minLength: Int): Pair<Int, Int>? {

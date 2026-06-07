@@ -21,6 +21,7 @@ object FileUtils {
     suspend fun saveEditedBitmap(context: Context, bitmap: Bitmap, sourceName: String = "EDITED"): File? = ImageProcessor.saveEditedBitmap(context, bitmap, sourceName)
     fun duplicateImageFile(context: Context, sourcePath: String): File? = ImageProcessor.duplicateImageFile(context, sourcePath)
     fun decodeSampledBitmap(path: String, reqWidth: Int = 1600, reqHeight: Int = 1600): Bitmap? = ImageProcessor.decodeSampledBitmap(path, reqWidth, reqHeight)
+    fun normalizeBitmapOrientation(source: Bitmap, file: File): Bitmap = ImageProcessor.normalizeBitmapOrientation(source, file)
     fun applyPerspectiveCorrection(file: File, corners: List<Offset>, previewWidth: Int, previewHeight: Int): File? = ImageProcessor.applyPerspectiveCorrection(file, corners, previewWidth, previewHeight)
     fun rotateBitmap(source: Bitmap, degrees: Float): Bitmap = ImageProcessor.rotateBitmap(source, degrees)
     fun cropBitmapNormalized(source: Bitmap, leftPercent: Float, topPercent: Float, rightPercent: Float, bottomPercent: Float): Bitmap = ImageProcessor.cropBitmapNormalized(source, leftPercent, topPercent, rightPercent, bottomPercent)
