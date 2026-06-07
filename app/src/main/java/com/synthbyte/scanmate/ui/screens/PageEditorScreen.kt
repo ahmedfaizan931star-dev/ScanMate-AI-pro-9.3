@@ -485,6 +485,7 @@ fun PageEditorScreen(docId: Long, pageId: Long, onNavigateBack: () -> Unit) {
 
     if (showCropDialog) {
         ManualCropDialog(
+            bitmap = workingBitmap,
             onDismiss = { showCropDialog = false },
             onApply = { left, top, right, bottom ->
                 pushUndoSnapshot()
@@ -581,7 +582,11 @@ private fun ToolSectionTitle(text: String) {
 }
 
 @Composable
-private fun ManualCropDialog(onDismiss: () -> Unit, onApply: (Float, Float, Float, Float) -> Unit) {
+private fun ManualCropDialog(
+    bitmap: android.graphics.Bitmap?,
+    onDismiss: () -> Unit,
+    onApply: (Float, Float, Float, Float) -> Unit
+) {
     var left by remember { mutableFloatStateOf(0.04f) }
     var top by remember { mutableFloatStateOf(0.04f) }
     var right by remember { mutableFloatStateOf(0.04f) }
@@ -592,6 +597,12 @@ private fun ManualCropDialog(onDismiss: () -> Unit, onApply: (Float, Float, Floa
         CropPreset("balanced", "Balanced", 0.05f),
         CropPreset("tight", "Tight", 0.09f)
     )
+    val cropIsValid = remember(left, top, right, bottom) {
+        val visibleWidth = 1f - left - right
+        val visibleHeight = 1f - top - bottom
+        left in 0f..0.45f && top in 0f..0.45f && right in 0f..0.45f && bottom in 0f..0.45f &&
+            visibleWidth >= 0.30f && visibleHeight >= 0.30f
+    }
 
     fun setPreset(preset: CropPreset) {
         selectedPreset = preset.id
@@ -602,6 +613,18 @@ private fun ManualCropDialog(onDismiss: () -> Unit, onApply: (Float, Float, Floa
         bottom = value
     }
 
+    fun fitPage() {
+        selectedPreset = "fit"
+        left = 0f
+        top = 0f
+        right = 0f
+        bottom = 0f
+    }
+
+    fun resetBalanced() {
+        setPreset(CropPreset("balanced", "Balanced", 0.05f))
+    }
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
@@ -609,9 +632,9 @@ private fun ManualCropDialog(onDismiss: () -> Unit, onApply: (Float, Float, Floa
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(0.88f)
-                .padding(16.dp)
-                .widthIn(max = 560.dp),
+                .fillMaxHeight(0.92f)
+                .padding(12.dp)
+                .widthIn(max = 640.dp),
             shape = RoundedCornerShape(24.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
         ) {
@@ -625,11 +648,23 @@ private fun ManualCropDialog(onDismiss: () -> Unit, onApply: (Float, Float, Floa
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text("Crop page", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                             Text(
-                                "Choose a style, then fine tune the page edges.",
+                                "Use a safe crop preset or fine tune each edge. The preview keeps extra margin so document content is not cut.",
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 style = MaterialTheme.typography.bodyMedium
                             )
                         }
+                    }
+                    item {
+                        CropPreviewBox(
+                            bitmap = bitmap,
+                            left = left,
+                            top = top,
+                            right = right,
+                            bottom = bottom,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 260.dp)
+                        )
                     }
                     item {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
@@ -647,17 +682,85 @@ private fun ManualCropDialog(onDismiss: () -> Unit, onApply: (Float, Float, Floa
                     item { CropSlider("Top edge", top) { top = it; selectedPreset = "custom" } }
                     item { CropSlider("Right edge", right) { right = it; selectedPreset = "custom" } }
                     item { CropSlider("Bottom edge", bottom) { bottom = it; selectedPreset = "custom" } }
+                    if (!cropIsValid) {
+                        item {
+                            Text(
+                                "Crop is too tight. Keep at least 30% of page width and height visible.",
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
                 }
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 16.dp),
-                    horizontalArrangement = Arrangement.End,
+                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    TextButton(onClick = onDismiss) { Text("Cancel") }
-                    Spacer(Modifier.size(8.dp))
-                    Button(onClick = { onApply(left, top, right, bottom) }) { Text("Apply crop") }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = ::fitPage) { Text("Fit") }
+                        TextButton(onClick = ::resetBalanced) { Text("Reset") }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = onDismiss) { Text("Cancel") }
+                        Button(
+                            enabled = cropIsValid,
+                            onClick = { onApply(left, top, right, bottom) }
+                        ) { Text("Apply crop") }
+                    }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun CropPreviewBox(
+    bitmap: android.graphics.Bitmap?,
+    left: Float,
+    top: Float,
+    right: Float,
+    bottom: Float,
+    modifier: Modifier = Modifier
+) {
+    BoxWithConstraints(
+        modifier = modifier
+            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(18.dp))
+            .padding(12.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        val boxWidth = constraints.maxWidth.toFloat().coerceAtLeast(1f)
+        val boxHeight = constraints.maxHeight.toFloat().coerceAtLeast(1f)
+        val bitmapAspect = bitmap?.let { it.width.toFloat() / it.height.toFloat().coerceAtLeast(1f) } ?: 0.72f
+        val boxAspect = boxWidth / boxHeight
+        val imageWidth = if (bitmapAspect > boxAspect) boxWidth else boxHeight * bitmapAspect
+        val imageHeight = if (bitmapAspect > boxAspect) boxWidth / bitmapAspect else boxHeight
+        val imageLeft = (boxWidth - imageWidth) / 2f
+        val imageTop = (boxHeight - imageHeight) / 2f
+
+        bitmap?.let {
+            Image(
+                bitmap = it.asImageBitmap(),
+                contentDescription = "Crop preview",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Fit
+            )
+        }
+        val guideColor = MaterialTheme.colorScheme.primary
+        val maskColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.68f)
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val cropLeft = imageLeft + imageWidth * left.coerceIn(0f, 0.45f)
+            val cropTop = imageTop + imageHeight * top.coerceIn(0f, 0.45f)
+            val cropRight = imageLeft + imageWidth * (1f - right.coerceIn(0f, 0.45f))
+            val cropBottom = imageTop + imageHeight * (1f - bottom.coerceIn(0f, 0.45f))
+            drawRect(maskColor, topLeft = Offset(imageLeft, imageTop), size = androidx.compose.ui.geometry.Size(imageWidth, (cropTop - imageTop).coerceAtLeast(0f)))
+            drawRect(maskColor, topLeft = Offset(imageLeft, cropBottom), size = androidx.compose.ui.geometry.Size(imageWidth, (imageTop + imageHeight - cropBottom).coerceAtLeast(0f)))
+            drawRect(maskColor, topLeft = Offset(imageLeft, cropTop), size = androidx.compose.ui.geometry.Size((cropLeft - imageLeft).coerceAtLeast(0f), (cropBottom - cropTop).coerceAtLeast(0f)))
+            drawRect(maskColor, topLeft = Offset(cropRight, cropTop), size = androidx.compose.ui.geometry.Size((imageLeft + imageWidth - cropRight).coerceAtLeast(0f), (cropBottom - cropTop).coerceAtLeast(0f)))
+            drawLine(guideColor, Offset(cropLeft, cropTop), Offset(cropRight, cropTop), strokeWidth = 5f)
+            drawLine(guideColor, Offset(cropRight, cropTop), Offset(cropRight, cropBottom), strokeWidth = 5f)
+            drawLine(guideColor, Offset(cropRight, cropBottom), Offset(cropLeft, cropBottom), strokeWidth = 5f)
+            drawLine(guideColor, Offset(cropLeft, cropBottom), Offset(cropLeft, cropTop), strokeWidth = 5f)
         }
     }
 }
@@ -670,13 +773,20 @@ private fun PerspectiveDialog(
     onDismiss: () -> Unit,
     onApply: (Float, Float, Float, Float, Float, Float, Float, Float) -> Unit
 ) {
-    val detectedCorners = listOf(
+    val defaultCorners = listOf(
         Offset(0.06f, 0.06f),
         Offset(0.94f, 0.06f),
         Offset(0.94f, 0.94f),
         Offset(0.06f, 0.94f)
     )
-    var corners by remember { mutableStateOf(detectedCorners) }
+    val fitCorners = listOf(
+        Offset(0.02f, 0.02f),
+        Offset(0.98f, 0.02f),
+        Offset(0.98f, 0.98f),
+        Offset(0.02f, 0.98f)
+    )
+    var corners by remember { mutableStateOf(defaultCorners) }
+    var activeCorner by remember { mutableStateOf<Int?>(null) }
     val isValid = remember(corners) { cornersAreValid(corners) }
 
     Dialog(
@@ -686,22 +796,22 @@ private fun PerspectiveDialog(
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(0.92f)
-                .padding(12.dp)
-                .widthIn(max = 680.dp),
+                .fillMaxHeight(0.94f)
+                .padding(10.dp)
+                .widthIn(max = 720.dp),
             shape = RoundedCornerShape(24.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
         ) {
             Column(modifier = Modifier.fillMaxSize().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("Drag page corners", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                    Text("Place each handle on the real document corner.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Place each large handle on the real document corner. Handles stay inside bounds and cannot cross.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 BoxWithConstraints(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f)
-                        .heightIn(min = 280.dp)
+                        .heightIn(min = 320.dp)
                         .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(18.dp))
                         .padding(10.dp)
                 ) {
@@ -724,19 +834,20 @@ private fun PerspectiveDialog(
                     }
                     val handleColor = MaterialTheme.colorScheme.primary
                     val handleBorder = MaterialTheme.colorScheme.surface
-                    val guideColor = MaterialTheme.colorScheme.primary
+                    val guideColor = if (isValid) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
                     Canvas(modifier = Modifier.fillMaxSize()) {
                         val points = corners.map { point ->
                             Offset(imageLeft + point.x * imageWidth, imageTop + point.y * imageHeight)
                         }
-                        drawLine(guideColor, points[0], points[1], strokeWidth = 4f)
-                        drawLine(guideColor, points[1], points[2], strokeWidth = 4f)
-                        drawLine(guideColor, points[2], points[3], strokeWidth = 4f)
-                        drawLine(guideColor, points[3], points[0], strokeWidth = 4f)
-                        points.forEach { point ->
-                            drawCircle(handleBorder, radius = 24f, center = point)
-                            drawCircle(handleColor, radius = 18f, center = point)
-                            drawCircle(handleBorder, radius = 18f, center = point, style = Stroke(width = 4f))
+                        drawLine(guideColor, points[0], points[1], strokeWidth = 5f)
+                        drawLine(guideColor, points[1], points[2], strokeWidth = 5f)
+                        drawLine(guideColor, points[2], points[3], strokeWidth = 5f)
+                        drawLine(guideColor, points[3], points[0], strokeWidth = 5f)
+                        points.forEachIndexed { index, point ->
+                            val radius = if (activeCorner == index) 28f else 23f
+                            drawCircle(handleBorder, radius = radius + 7f, center = point)
+                            drawCircle(handleColor, radius = radius, center = point)
+                            drawCircle(handleBorder, radius = radius, center = point, style = Stroke(width = 4f))
                         }
                     }
                     corners.forEachIndexed { index, point ->
@@ -745,25 +856,27 @@ private fun PerspectiveDialog(
                             imageLeft = imageLeft,
                             imageTop = imageTop,
                             imageWidth = imageWidth,
-                            imageHeight = imageHeight
+                            imageHeight = imageHeight,
+                            onDragStateChange = { dragging -> activeCorner = if (dragging) index else null }
                         ) { next ->
                             corners = corners.updateCorner(index, next)
                         }
                     }
                 }
-                if (!isValid) {
-                    Text(
-                        "Move the handles apart so the page outline does not cross.",
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
+                Text(
+                    text = if (isValid) "Tip: drag slowly near each corner for better OCR/export alignment." else "Move the handles apart so the page outline does not cross or become too small.",
+                    color = if (isValid) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall
+                )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    TextButton(onClick = { corners = detectedCorners }) { Text("Reset") }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = { corners = defaultCorners }) { Text("Reset") }
+                        TextButton(onClick = { corners = fitCorners }) { Text("Fit page") }
+                    }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         TextButton(onClick = onDismiss) { Text("Cancel") }
                         Button(
@@ -799,19 +912,24 @@ private fun CornerHandle(
     imageTop: Float,
     imageWidth: Float,
     imageHeight: Float,
+    onDragStateChange: (Boolean) -> Unit = {},
     onMove: (Offset) -> Unit
 ) {
     Box(
         modifier = Modifier
             .offset {
                 IntOffset(
-                    (imageLeft + position.x * imageWidth).roundToInt() - 28,
-                    (imageTop + position.y * imageHeight).roundToInt() - 28
+                    (imageLeft + position.x * imageWidth).roundToInt() - 34,
+                    (imageTop + position.y * imageHeight).roundToInt() - 34
                 )
             }
-            .size(56.dp)
+            .size(68.dp)
             .pointerInput(position) {
-                detectDragGestures { change, dragAmount ->
+                detectDragGestures(
+                    onDragStart = { onDragStateChange(true) },
+                    onDragCancel = { onDragStateChange(false) },
+                    onDragEnd = { onDragStateChange(false) }
+                ) { change, dragAmount ->
                     change.consume()
                     val next = Offset(
                         (position.x + dragAmount.x / imageWidth.coerceAtLeast(1f)).coerceIn(0.02f, 0.98f),
@@ -839,6 +957,7 @@ private fun CropSlider(label: String, value: Float, onChange: (Float) -> Unit) {
 }
 
 private fun List<Offset>.updateCorner(index: Int, next: Offset): List<Offset> {
+    if (size != 4) return this
     val minGap = 0.08f
     fun Float.inRange(min: Float, max: Float): Float {
         val low = min.coerceIn(0.02f, 0.98f)
@@ -861,6 +980,9 @@ private fun List<Offset>.updateCorner(index: Int, next: Offset): List<Offset> {
 
 private fun cornersAreValid(corners: List<Offset>): Boolean {
     if (corners.size != 4) return false
+    if (corners.any { it.x !in 0f..1f || it.y !in 0f..1f }) return false
+    if (segmentsIntersect(corners[0], corners[1], corners[2], corners[3])) return false
+    if (segmentsIntersect(corners[1], corners[2], corners[3], corners[0])) return false
     val area = abs(
         corners.indices.sumOf { i ->
             val a = corners[i]
@@ -868,9 +990,33 @@ private fun cornersAreValid(corners: List<Offset>): Boolean {
             (a.x * b.y - b.x * a.y).toDouble()
         }.toFloat()
     ) / 2f
+    val topWidth = distance(corners[0], corners[1])
+    val bottomWidth = distance(corners[3], corners[2])
+    val leftHeight = distance(corners[0], corners[3])
+    val rightHeight = distance(corners[1], corners[2])
+    val aspect = maxOf(topWidth, bottomWidth) / maxOf(leftHeight, rightHeight, 0.001f)
     return area >= 0.12f &&
+        aspect in 0.22f..4.8f &&
+        topWidth >= 0.16f && bottomWidth >= 0.16f && leftHeight >= 0.16f && rightHeight >= 0.16f &&
         corners[0].x < corners[1].x &&
         corners[3].x < corners[2].x &&
         corners[0].y < corners[3].y &&
         corners[1].y < corners[2].y
+}
+
+private fun distance(a: Offset, b: Offset): Float {
+    val dx = a.x - b.x
+    val dy = a.y - b.y
+    return kotlin.math.sqrt(dx * dx + dy * dy)
+}
+
+private fun segmentsIntersect(a: Offset, b: Offset, c: Offset, d: Offset): Boolean {
+    fun orientation(p: Offset, q: Offset, r: Offset): Float {
+        return (q.y - p.y) * (r.x - q.x) - (q.x - p.x) * (r.y - q.y)
+    }
+    val o1 = orientation(a, b, c)
+    val o2 = orientation(a, b, d)
+    val o3 = orientation(c, d, a)
+    val o4 = orientation(c, d, b)
+    return o1 * o2 < 0f && o3 * o4 < 0f
 }
