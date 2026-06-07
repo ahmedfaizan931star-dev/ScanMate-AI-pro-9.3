@@ -244,19 +244,8 @@ object OcrHelper {
     )
 
     private fun postProcessOcrText(value: String): String {
-        if (value.isBlank()) return ""
-        return value
-            .replace(Regex("[ \t]{2,}"), " ")
-            .replace(Regex("(?i)\\b([a-z0-9._%+-]+)\\s*@\\s*([a-z0-9.-]+)\\s*\\.\\s*([a-z]{2,})\\b")) { match ->
-                "${match.groupValues[1]}@${match.groupValues[2]}.${match.groupValues[3]}"
-            }
-            .replace(Regex("(?i)\\b([a-z0-9-]+(?:\\s*\\.\\s*[a-z0-9-]+)+)\\s*\\.\\s*([a-z]{2,})\\b")) { match ->
-                "${match.groupValues[1].replace(Regex("\\s*\\.\\s*"), ".")}.${match.groupValues[2]}"
-            }
-            .replace(Regex("(?i)\\b(https?)\\s*:\\s*/\\s*/\\s*")) { match -> "${match.groupValues[1].lowercase()}://" }
-            .replace(Regex("(?i)\\b(www)\\s*\\.\\s*")) { "www." }
-            .trim()
-    }
+    return OcrPostProcessor.normalize(value)
+}
 
     private fun Text.symbolConfidencePercent(): Int? {
         val values = textBlocks
