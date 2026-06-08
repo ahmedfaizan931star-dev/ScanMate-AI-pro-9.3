@@ -5,3 +5,10 @@ keystore.properties
 *.jks
 *.keystore
 app/keystore/
+
+# Generated build outputs
+.gradle/
+build/
+app/build/
+**/build/
+local.properties
