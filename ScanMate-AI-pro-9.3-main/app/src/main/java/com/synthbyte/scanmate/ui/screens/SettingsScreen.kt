@@ -68,7 +68,7 @@ import com.synthbyte.scanmate.domain.GeminiModels
 import com.synthbyte.scanmate.utils.NetworkUtils
 import kotlinx.coroutines.launch
 
-private const val PRIVACY_URL = "https://synthbyte.github.io/scanmate-privacy"
+private const val PRIVACY_URL = "https://ahmedfaizan931star-dev.github.io/scanmate-ai-pro-site/privacy.html"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -99,7 +99,7 @@ fun SettingsScreen(onNavigateBack: () -> Unit, settingsRepository: SettingsRepos
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Settings") },
+                title = { Text("Settings", fontWeight = FontWeight.ExtraBold) },
                 navigationIcon = { IconButton(onClick = onNavigateBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } }
             )
         }
@@ -112,6 +112,20 @@ fun SettingsScreen(onNavigateBack: () -> Unit, settingsRepository: SettingsRepos
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            Card(
+                shape = RoundedCornerShape(24.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Preferences", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
+                    Text(
+                        "Control theme, workspace, optional AI, privacy and diagnostics from one clean place.",
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            }
             StatusCard(isOnline = isOnline)
 
             Card(
@@ -125,7 +139,7 @@ fun SettingsScreen(onNavigateBack: () -> Unit, settingsRepository: SettingsRepos
                         Text("Theme", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 10.dp))
                     }
                     Text(
-                        "ScanMate follows your device theme by default. Choose Light or Dark here only when you want to override it.",
+                        "Use the system theme by default, or choose a fixed light or dark appearance.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -151,7 +165,7 @@ fun SettingsScreen(onNavigateBack: () -> Unit, settingsRepository: SettingsRepos
                         Icon(Icons.Default.Folder, null, tint = MaterialTheme.colorScheme.primary)
                         Text("Default workspace", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 10.dp))
                     }
-                    Text("New organization actions default to this workspace. Existing files are not moved unless you choose bulk move.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("New scans and imports use this workspace by default. Existing files stay where they are.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                         OutlinedTextField(
                             value = defaultWorkspaceInput,
@@ -177,7 +191,7 @@ fun SettingsScreen(onNavigateBack: () -> Unit, settingsRepository: SettingsRepos
                         Text("Gemini AI", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 10.dp))
                     }
                     Text(
-                        "Add your own Gemini API key to enable optional online AI tools. Scanner, OCR history, PDF export, QR tools and files remain offline-safe without a key.",
+                        "Add your own Gemini API key only for optional online AI tools. Scanning, OCR history, PDF export, QR tools and files remain usable without a key.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

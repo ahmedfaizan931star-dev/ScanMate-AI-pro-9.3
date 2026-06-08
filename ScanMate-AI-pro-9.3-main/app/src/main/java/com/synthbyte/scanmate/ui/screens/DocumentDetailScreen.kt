@@ -206,7 +206,7 @@ fun DocumentDetailScreen(
                 isProcessing = false
                 exportProgress = null
                 clipboardManager.setPrimaryClip(ClipData.newPlainText("Extracted Text", state.text))
-                Toast.makeText(context, "OCR completed · ${state.qualityLabel}", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "OCR complete · ${state.qualityLabel}", Toast.LENGTH_SHORT).show()
                 viewModel.clearExportState()
             }
             is ExportState.QualitySuccess -> {
@@ -225,7 +225,7 @@ fun DocumentDetailScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(documentWithPages?.document?.title ?: "Document", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                title = { Text(documentWithPages?.document?.title ?: "Document", maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.ExtraBold) },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
                 },
@@ -250,7 +250,7 @@ fun DocumentDetailScreen(
                             }
                         )
                         DropdownMenuItem(
-                            text = { Text("OCR full document") },
+                            text = { Text("Run OCR") },
                             leadingIcon = { Icon(Icons.Default.TextSnippet, null) },
                             onClick = {
                                 topBarMenuExpanded = false
@@ -258,7 +258,7 @@ fun DocumentDetailScreen(
                             }
                         )
                         DropdownMenuItem(
-                            text = { Text("Document Quality") },
+                            text = { Text("Check quality") },
                             leadingIcon = { Icon(Icons.Default.Analytics, null) },
                             onClick = {
                                 viewModel.scoreQuality(documentWithPages)
@@ -300,6 +300,21 @@ fun DocumentDetailScreen(
                 LoadingDocumentState()
             } else {
                 val pages = dwp.pages.sortedBy { it.pageOrder }
+                Card(
+                    shape = RoundedCornerShape(24.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)
+                ) {
+                    Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(dwp.document.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            "${pages.size} page${if (pages.size == 1) "" else "s"} · ${dwp.document.workspace.ifBlank { "Inbox" }} · ${dwp.document.category.ifBlank { "General" }}",
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
                 DocumentPreview(pages)
                 QuickActionRow(
                     dwp = dwp,
@@ -330,7 +345,7 @@ fun DocumentDetailScreen(
                     },
                     onReorder = { reorderedPages ->
                         viewModel.reorderPages(reorderedPages) {
-                            Toast.makeText(context, "Drag reorder saved", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Page order saved", Toast.LENGTH_SHORT).show()
                         }
                     },
                     onDuplicate = { page ->

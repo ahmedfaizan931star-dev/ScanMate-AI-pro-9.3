@@ -206,7 +206,7 @@ fun PageEditorScreen(docId: Long, pageId: Long, onNavigateBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Page Editor") },
+                title = { Text("Edit page", fontWeight = FontWeight.ExtraBold) },
                 navigationIcon = { IconButton(onClick = onNavigateBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
                 actions = {
                     IconButton(onClick = {
@@ -243,6 +243,16 @@ fun PageEditorScreen(docId: Long, pageId: Long, onNavigateBack: () -> Unit) {
             modifier = Modifier.padding(padding).fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
+            Card(
+                shape = RoundedCornerShape(22.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Make this page cleaner", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
+                    Text("Crop, rotate, enhance, OCR and save without leaving the document.", color = MaterialTheme.colorScheme.onPrimaryContainer, style = MaterialTheme.typography.bodyMedium)
+                }
+            }
             if (isProcessing) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
 
             val bitmap = workingBitmap
@@ -297,21 +307,21 @@ fun PageEditorScreen(docId: Long, pageId: Long, onNavigateBack: () -> Unit) {
                 ) { Text("Redo") }
             }
 
-            ToolSectionTitle("Edit tools")
+            ToolSectionTitle("Layout and crop")
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = {
                     pushUndoSnapshot()
                     workingBitmap?.let { viewModel.pushBitmap(FileUtils.rotateBitmap(it, -90f)) }
                 }, modifier = Modifier.weight(1f)) {
                     Icon(Icons.Default.RotateLeft, null)
-                    Text(" Left")
+                    Text(" Rotate left")
                 }
                 OutlinedButton(onClick = {
                     pushUndoSnapshot()
                     workingBitmap?.let { viewModel.pushBitmap(FileUtils.rotateBitmap(it, 90f)) }
                 }, modifier = Modifier.weight(1f)) {
                     Icon(Icons.Default.RotateRight, null)
-                    Text(" Right")
+                    Text(" Rotate right")
                 }
             }
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -335,7 +345,7 @@ fun PageEditorScreen(docId: Long, pageId: Long, onNavigateBack: () -> Unit) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { showPerspectiveDialog = true }, modifier = Modifier.weight(1f)) {
                     Icon(Icons.Default.Crop, null)
-                    Text(" Corners")
+                    Text(" Adjust corners")
                 }
                 OutlinedButton(onClick = {
                     val current = workingBitmap ?: return@OutlinedButton
@@ -348,7 +358,7 @@ fun PageEditorScreen(docId: Long, pageId: Long, onNavigateBack: () -> Unit) {
                         isProcessing = false
                     }
                 }, modifier = Modifier.weight(1f)) {
-                    Text("Smart enhance")
+                    Text("Enhance")
                 }
             }
 
@@ -361,7 +371,7 @@ fun PageEditorScreen(docId: Long, pageId: Long, onNavigateBack: () -> Unit) {
                 }
             }
 
-            ToolSectionTitle("CamScanner-style filters")
+            ToolSectionTitle("Filters and cleanup")
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 items(FilterType.entries, key = { it.name }) { filter ->
                     FilterChip(
@@ -387,7 +397,7 @@ fun PageEditorScreen(docId: Long, pageId: Long, onNavigateBack: () -> Unit) {
                             pushUndoSnapshot()
                             viewModel.removeMarks()
                         },
-                        label = { Text("Erase Marks") },
+                        label = { Text("Clean marks") },
                         leadingIcon = { Icon(Icons.Default.AutoAwesome, null, Modifier.size(16.dp)) }
                     )
                 }
@@ -399,7 +409,7 @@ fun PageEditorScreen(docId: Long, pageId: Long, onNavigateBack: () -> Unit) {
                             pushUndoSnapshot()
                             viewModel.removeShadow()
                         },
-                        label = { Text("Remove Shadow") },
+                        label = { Text("Reduce shadow") },
                         leadingIcon = { Icon(Icons.Default.WbSunny, null, Modifier.size(16.dp)) }
                     )
                 }
@@ -479,7 +489,7 @@ fun PageEditorScreen(docId: Long, pageId: Long, onNavigateBack: () -> Unit) {
                     Text(" Delete")
                 }
             }
-            AssistChip(onClick = {}, label = { Text("Tip: use Save after rotate, crop, or filters to write the edited bitmap back to the document.") })
+            AssistChip(onClick = {}, label = { Text("Save after crop, filter, text, watermark or rotation.") })
         }
     }
 

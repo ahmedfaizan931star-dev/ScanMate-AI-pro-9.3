@@ -102,7 +102,7 @@ fun FileManagerScreen(onNavigateBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Workspaces") },
+                title = { Text("Files", fontWeight = FontWeight.ExtraBold) },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
                 },
@@ -127,33 +127,33 @@ fun FileManagerScreen(onNavigateBack: () -> Unit) {
     ) { padding ->
         Column(modifier = Modifier.padding(padding).fillMaxSize().padding(16.dp)) {
             Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)),
-                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                shape = RoundedCornerShape(24.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.Folder, null, tint = MaterialTheme.colorScheme.primary)
                     Column(modifier = Modifier.padding(start = 12.dp)) {
-                        Text("Workspace file desk", fontWeight = FontWeight.Bold)
-                        Text("Browse scans, PDFs, QR codes, OCR text and exports without a login wall.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Managed files", fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.titleMedium)
+                        Text("Browse scans, PDFs, QR codes, OCR text and exports stored by ScanMate.", color = MaterialTheme.colorScheme.onPrimaryContainer, style = MaterialTheme.typography.bodyMedium)
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(14.dp))
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
                 leadingIcon = { Icon(Icons.Default.Search, null) },
-                label = { Text("Search in workspace") }
+                label = { Text("Search files and folders") }
             )
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(selected = sortMode == FileSortMode.DATE, onClick = { sortMode = FileSortMode.DATE }, label = { Text("Date") })
+                FilterChip(selected = sortMode == FileSortMode.DATE, onClick = { sortMode = FileSortMode.DATE }, label = { Text("Recent") })
                 FilterChip(selected = sortMode == FileSortMode.NAME, onClick = { sortMode = FileSortMode.NAME }, label = { Text("Name") })
-                FilterChip(selected = sortMode == FileSortMode.SIZE, onClick = { sortMode = FileSortMode.SIZE }, label = { Text("Size") })
+                FilterChip(selected = sortMode == FileSortMode.SIZE, onClick = { sortMode = FileSortMode.SIZE }, label = { Text("Largest") })
             }
 
             Spacer(modifier = Modifier.height(16.dp))

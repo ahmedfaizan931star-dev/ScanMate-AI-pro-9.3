@@ -173,10 +173,10 @@ fun CameraScreen(
     val hasLiveDetection = detectedCorners != null
     var selectedFilter by remember { mutableStateOf(FilterType.ORIGINAL) }
     val scannerHint = when {
-        !autoDetectEnabled -> "Manual scan · align inside the frame"
-        analysisFrameCount == 0 -> "Starting smart scanner…"
-        !hasLiveDetection -> "Place page inside the guide"
-        currentConfidence >= 0.86f -> "Document locked · hold steady"
+        !autoDetectEnabled -> "Manual mode · align the page"
+        analysisFrameCount == 0 -> "Starting edge detection…"
+        !hasLiveDetection -> "Place the page inside the guide"
+        currentConfidence >= 0.86f -> "Edges locked · hold steady"
         currentConfidence >= 0.62f -> "Almost ready · hold steady"
         else -> "Move closer or improve lighting"
     }
@@ -429,7 +429,7 @@ fun CameraScreen(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp)
+                .padding(horizontal = 16.dp, vertical = 18.dp)
                 .align(Alignment.TopCenter),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
@@ -443,7 +443,7 @@ fun CameraScreen(
                 }
                 AssistChip(
                     onClick = {},
-                    label = { Text("${capturedImages.size} page${if (capturedImages.size == 1) "" else "s"}") }
+                    label = { Text("${capturedImages.size} page${if (capturedImages.size == 1) "" else "s"} ready") }
                 )
             }
 
@@ -461,6 +461,8 @@ fun CameraScreen(
         if (showSettingsSheet) {
             ModalBottomSheet(onDismissRequest = { showSettingsSheet = false }) {
                 Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Camera setup", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
+                    Text("Choose the frame and filter before capture.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text("Aspect ratio", style = MaterialTheme.typography.titleMedium)
                     ScanAspect.entries.forEach { option ->
                         ListItem(
@@ -474,7 +476,7 @@ fun CameraScreen(
                             }
                         )
                     }
-                    Text("Current quality: ${quality.label}", style = MaterialTheme.typography.bodyMedium)
+                    Text("Quality: ${quality.label}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text("Capture filter", style = MaterialTheme.typography.titleMedium)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         FilterChip(
@@ -496,8 +498,8 @@ fun CameraScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.BottomCenter)
-                .background(Color.Black.copy(alpha = 0.88f), RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
-                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .background(Color.Black.copy(alpha = 0.78f), RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
+                .padding(horizontal = 16.dp, vertical = 14.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -527,7 +529,7 @@ fun CameraScreen(
                     }
                     AssistChip(
                         onClick = { autoDetectEnabled = !autoDetectEnabled },
-                        label = { Text(if (autoDetectEnabled) "Auto ✓" else "Auto ✗") },
+                        label = { Text(if (autoDetectEnabled) "Auto edges" else "Manual") },
                         shape = RoundedCornerShape(50),
                         colors = AssistChipDefaults.assistChipColors(
                             labelColor = if (autoDetectEnabled) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -563,7 +565,7 @@ fun CameraScreen(
             ) {
                 AssistChip(
                     onClick = {},
-                    label = { Text(if (hasLiveDetection) "Edges ${((currentConfidence * 100).toInt()).coerceIn(0, 100)}%" else "Guide") },
+                    label = { Text(if (hasLiveDetection) "Edge match ${((currentConfidence * 100).toInt()).coerceIn(0, 100)}%" else "Guide frame") },
                     shape = RoundedCornerShape(50),
                     colors = AssistChipDefaults.assistChipColors(
                         containerColor = Color.White.copy(alpha = 0.12f),
