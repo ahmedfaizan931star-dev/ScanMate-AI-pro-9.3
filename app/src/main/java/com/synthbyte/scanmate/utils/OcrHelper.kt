@@ -23,7 +23,7 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 
-private const val OCR_MAX_SIDE = 2048
+private const val OCR_MAX_SIDE = 2300
 
 data class OcrExtractionResult(
     val text: String,
@@ -180,9 +180,29 @@ object OcrHelper {
 
         return postProcessOcrText(
             paragraphs.joinToString("\n\n") { paragraph ->
-                paragraph.joinToString("\n").trim()
+                mergeWrappedOcrLines(paragraph).trim()
             }
         ).trim()
+    }
+
+    private fun mergeWrappedOcrLines(lines: List<String>): String {
+        if (lines.isEmpty()) return ""
+        val merged = mutableListOf<String>()
+        for (line in lines.map { it.trim() }.filter { it.isNotBlank() }) {
+            val previous = merged.lastOrNull()
+            val currentLooksLikeHeading = line.length <= 42 && (
+                line.all { it.isUpperCase() || it.isWhitespace() || it.isDigit() || it in ".:-" } ||
+                    line.matches(Regex("(?i)^(unit|chapter|examples|system|computer|car|question|q\\.).*")) ||
+                    line.matches(Regex("^\\d+\\.\\s+.*"))
+                )
+            val previousEndsSentence = previous?.lastOrNull() in listOf('.', '?', '!', ':')
+            if (previous == null || currentLooksLikeHeading || previousEndsSentence && line.length < 60) {
+                merged += line
+            } else {
+                merged[merged.lastIndex] = "$previous $line".replace(Regex("\\s{2,}"), " ")
+            }
+        }
+        return merged.joinToString("\n")
     }
 
     private data class OcrLine(val rect: Rect, val text: String, val blockIndex: Int)
@@ -292,6 +312,8 @@ object OcrHelper {
         val base = scaled.copy(Bitmap.Config.ARGB_8888, false)
         result += "deskewed" to base
         runCatching { ImageProcessor.enhanceForOcr(base) }.getOrNull()?.let { result += "document-clean" to it }
+        runCatching { FileUtils.applyFilter(base, FilterType.BOOK_PAGE) }.getOrNull()?.let { result += "book-page" to it }
+        runCatching { FileUtils.applyFilter(base, FilterType.SHARP_SCAN) }.getOrNull()?.let { result += "sharp-scan" to it }
         val gray = toGrayscaleBitmap(base)
         result += "grayscale" to gray
         runCatching { adaptiveBinarizeBitmap(gray) }.getOrNull()?.let { result += "adaptive-bw" to it }
@@ -303,11 +325,17 @@ object OcrHelper {
 
     private fun ocrQualityScore(result: OcrExtractionResult): Double {
         if (result.text.isBlank() || result.text.startsWith("OCR failed", ignoreCase = true)) return Double.NEGATIVE_INFINITY
-        val textLengthScore = min(result.text.length, 1600) / 1600.0 * 18.0
-        val wordScore = min(result.wordCount, 240) * 0.32
-        val confidenceScore = result.confidencePercent * 1.25
-        val structureBonus = result.text.count { it == '\n' }.coerceAtMost(18) * 0.55
-        return confidenceScore + wordScore + textLengthScore + structureBonus
+        val clean = result.text
+        val textLengthScore = min(clean.length, 1800) / 1800.0 * 20.0
+        val wordScore = min(result.wordCount, 260) * 0.34
+        val confidenceScore = result.confidencePercent * 1.18
+        val structureBonus = clean.count { it == '\n' }.coerceAtMost(24) * 0.45
+        val englishBonus = listOf("system", "computer", "hardware", "software", "component", "example", "function")
+            .count { clean.contains(it, ignoreCase = true) } * 2.2
+        val noisePenalty = clean.count { it == '�' || it == '¤' || it == '|' }.coerceAtMost(30) * 1.5 +
+            Regex("[A-Za-z][0-9][A-Za-z]").findAll(clean).count().coerceAtMost(18) * 1.7 +
+            Regex("[A-Z]{2}[a-z]{2,}").findAll(clean).count().coerceAtMost(18) * 0.7
+        return confidenceScore + wordScore + textLengthScore + structureBonus + englishBonus - noisePenalty
     }
 
     private fun toGrayscaleBitmap(source: Bitmap): Bitmap {

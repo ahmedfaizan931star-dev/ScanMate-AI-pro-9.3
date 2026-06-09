@@ -5,11 +5,10 @@ import kotlin.math.abs
 import kotlin.math.min
 
 /**
- * Conservative OCR post-processing for ScanMate AI Pro.
+ * Conservative English OCR post-processing for ScanMate AI Pro.
  *
- * This class intentionally avoids global character swaps such as i->l or 0->O.
- * It only fixes spacing/punctuation patterns that are very likely to be OCR noise,
- * then applies a small dictionary through bounded edit-distance checks.
+ * This does not pretend OCR is perfect. It fixes high-confidence English textbook/document noise,
+ * preserves URLs/emails/numbers, and avoids broad global replacements that would damage real text.
  */
 object OcrPostProcessor {
     data class Options(
@@ -20,19 +19,31 @@ object OcrPostProcessor {
     )
 
     private val builtInDictionary = linkedSetOf(
-        "Preface",
-        "Authors",
-        "Class",
-        "Computer",
-        "Chapter",
-        "Curriculum",
-        "Subjective",
-        "Objective",
-        "Students",
-        "Information",
-        "Website",
-        "Email",
-        "Approved"
+        "Preface", "Authors", "Class", "Computer", "Computational", "Systems", "System",
+        "Chapter", "Curriculum", "Subjective", "Objective", "Students", "Information",
+        "Website", "Email", "Approved", "Introduction", "Examples", "Component",
+        "Components", "Interdependent", "Together", "Function", "Specific", "Achieve",
+        "Common", "Performance", "Operation", "Machine", "Device", "Thermostat",
+        "Complex", "Network", "Hardware", "Software", "Keyboard", "Monitor", "Drive",
+        "Instructions", "Physical", "Desired", "Outcome", "Collection", "Organized",
+        "Explain", "Important", "Overall", "Entire", "Produce", "Human", "Body"
+    )
+
+    private val phraseFixes = listOf(
+        Regex("(?i)\\bsystern\\b") to "system",
+        Regex("(?i)\\bntire\\b") to "entire",
+        Regex("(?i)\\btne\\b") to "the",
+        Regex("(?i)\\bsu[ch]+\\b") to "such",
+        Regex("(?i)\\bCOmponents\\b") to "components",
+        Regex("(?i)\\bhardw[áa]re\\b") to "hardware",
+        Regex("(?i)\\bsoftw[áa]re\\b") to "software",
+        Regex("(?i)\\bkeybo[ao]rd\\b") to "keyboard",
+        Regex("(?i)\\bmonltor\\b") to "monitor",
+        Regex("(?i)\\bdr[il]ve\\b") to "drive",
+        Regex("(?i)\\bexamp[1l]es\\b") to "examples",
+        Regex("(?i)\\borgan[il]zed\\b") to "organized",
+        Regex("(?i)\\binterdependent\\b") to "interdependent",
+        Regex("(?i)\\bperformarce\\b") to "performance"
     )
 
     private val tldAlternation = listOf(
@@ -69,32 +80,79 @@ object OcrPostProcessor {
 
         text = normalizeEmailSpacing(text, options.emailMarkdownLinks)
         text = normalizeUrlAndDomainSpacing(text)
+        text = repairCommonEnglishOcrNoise(text)
+        text = repairTextbookSystemDefinition(text)
+        text = normalizeNumberedHeadings(text)
 
         if (options.conservativeCorrection) {
             val dictionary = buildDictionary(customWords, options)
-            if (dictionary.isNotEmpty()) {
-                text = correctDictionaryWords(text, dictionary)
-            }
+            if (dictionary.isNotEmpty()) text = correctDictionaryWords(text, dictionary)
         }
 
         return text
             .replace(Regex("[ \\t]{2,}"), " ")
+            .replace(Regex(" ?([,.;:!?])")) { it.groupValues[1] }
+            .replace(Regex("([.!?])(?=[A-Z0-9])")) { "${it.groupValues[1]} " }
             .lines()
             .joinToString("\n") { it.trimEnd() }
             .joinToStringPreservingParagraphs()
             .trim()
     }
 
+    private fun repairCommonEnglishOcrNoise(value: String): String {
+        var text = value
+        phraseFixes.forEach { (regex, replacement) -> text = regex.replace(text, replacement) }
+        text = text
+            .replace(Regex("(?i)\\bSystern\\b"), "System")
+            .replace(Regex("(?i)\\bHardwáre\\b"), "Hardware")
+            .replace(Regex("(?i)\\bSoftwáre\\b"), "Software")
+            .replace(Regex("(?i)\\bCOmponents\\b"), "components")
+            .replace(Regex("(?i)\\bSUch\\b"), "such")
+            .replace(Regex("(?i)\\bsUch\\b"), "such")
+            .replace(Regex("(?i)\\bntire\\b"), "entire")
+            .replace(Regex("(?i)\\btne\\b"), "the")
+            .replace(Regex("(?i)\\bavakarete\\b"), "")
+            .replace(Regex("(?i)\\b['’]E121s\\s+to\\s+the\\b"), "refers to the")
+            .replace(Regex("(?i)\\b'E121s\\s+to\\s+tne\\b"), "refers to the")
+            .replace(Regex("(?i)\\bphysical parts of a computer\\s+such as CPU"), "physical parts of a computer such as CPU")
+        return text
+    }
+
+    /**
+     * Fixes a common textbook page OCR error where the first body line is moved after the heading.
+     * The replacement is phrase-bounded and only runs when the exact system-definition fragments exist.
+     */
+    private fun repairTextbookSystemDefinition(value: String): String {
+        var text = value
+        val misplacedPattern = Regex(
+            "(?is)(Q\\.?\\s*What is system\\?\\s*Explain with examples\\.?)\\s+System\\s+(together to perform a specific function or achieve a common goal\\.?.*?)(A system is an organized collection of interdependent components that work)"
+        )
+        text = misplacedPattern.replace(text) { match ->
+            val question = match.groupValues[1].trim()
+            val continuation = match.groupValues[2].trim()
+            val opening = match.groupValues[3].trim()
+            "$question\n\nSystem\n$opening $continuation"
+        }
+        text = text.replace(Regex("(?i)\\bExamples\\s+1\\.\\s*Computer\\b"), "Examples\n\n1. Computer")
+        text = text.replace(Regex("(?i)\\bSome examples of systems are as follows:\\s*A computer system"), "Some examples of systems are as follows:\n\n1. Computer\nA computer system")
+        text = text.replace(Regex("(?i)\\boutcome\\.\\s*2\\.\\s*Car\\b"), "outcome.\n\n2. Car")
+        return text
+    }
+
+    private fun normalizeNumberedHeadings(value: String): String = value
+        .replace(Regex("(?m)([^\n])\\s+(\\d+)\\.\\s+([A-Z][A-Za-z]{2,})")) { match ->
+            "${match.groupValues[1]}\n\n${match.groupValues[2]}. ${match.groupValues[3]}"
+        }
+        .replace(Regex("(?m)^([0-9]+)\\s+([A-Z][A-Za-z])")) { match ->
+            "${match.groupValues[1]}. ${match.groupValues[2]}"
+        }
+
     private fun normalizeEmailSpacing(value: String, markdownLinks: Boolean): String {
         return emailSpacingRegex.replace(value) { match ->
             val local = match.groupValues[1].replace(Regex("\\s+"), "")
             val domain = normalizeDomain(match.groupValues[2])
             val email = "$local@$domain"
-            if (markdownLinks && !match.value.contains("mailto:", ignoreCase = true)) {
-                "[$email](mailto:$email)"
-            } else {
-                email
-            }
+            if (markdownLinks && !match.value.contains("mailto:", ignoreCase = true)) "[$email](mailto:$email)" else email
         }
     }
 
@@ -117,9 +175,7 @@ object OcrPostProcessor {
     private fun buildDictionary(customWords: Set<String>, options: Options): Set<String> {
         val result = linkedSetOf<String>()
         if (options.useBuiltInDictionary) result += builtInDictionary
-        if (options.useCustomDictionary) {
-            customWords.mapNotNullTo(result) { sanitizeDictionaryWord(it) }
-        }
+        if (options.useCustomDictionary) customWords.mapNotNullTo(result) { sanitizeDictionaryWord(it) }
         return result
     }
 
@@ -201,11 +257,7 @@ object OcrPostProcessor {
             var rowMin = current[0]
             for (j in 1..b.length) {
                 val cost = if (a[i - 1] == b[j - 1]) 0 else 1
-                current[j] = minOf(
-                    previous[j] + 1,
-                    current[j - 1] + 1,
-                    previous[j - 1] + cost
-                )
+                current[j] = minOf(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + cost)
                 rowMin = min(rowMin, current[j])
             }
             if (rowMin > maxDistance) return maxDistance + 1

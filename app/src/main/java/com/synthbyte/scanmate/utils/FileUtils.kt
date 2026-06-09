@@ -8,12 +8,15 @@ import java.io.File
 
 object FileUtils {
     fun createUniqueImageFile(context: Context): File = FileCore.createUniqueImageFile(context)
+    fun appRootFolder(context: Context): File? = FileCore.appRootFolder(context)
     fun appFolder(context: Context, name: String): File? = FileCore.appFolder(context, name)
     fun listManagedFiles(context: Context): List<File> = FileCore.listManagedFiles(context)
     fun shareFile(context: Context, file: File, mimeType: String = mimeTypeFor(file)) = FileCore.shareFile(context, file, mimeType)
     fun openFile(context: Context, file: File, mimeType: String = mimeTypeFor(file)) = FileCore.openFile(context, file, mimeType)
     fun shareText(context: Context, text: String, title: String = "Share Text") = FileCore.shareText(context, text, title)
     fun copyUriToImageFile(context: Context, uri: Uri): File? = FileCore.copyUriToImageFile(context, uri)
+    fun copyFileToFolder(context: Context, source: File, folderName: String, preferredName: String = source.nameWithoutExtension): File? = FileCore.copyFileToFolder(context, source, folderName, preferredName)
+    fun moveFileToFolder(context: Context, source: File, folderName: String, preferredName: String = source.nameWithoutExtension): File? = FileCore.moveFileToFolder(context, source, folderName, preferredName)
     suspend fun saveTextFile(context: Context, text: String, filename: String): File? = FileCore.saveTextFile(context, text, filename)
     suspend fun saveBitmapAsPng(context: Context, bitmap: Bitmap, filename: String): File? = FileCore.saveBitmapAsPng(context, bitmap, filename)
     suspend fun saveBitmapToFolder(context: Context, bitmap: Bitmap, folderName: String, filename: String, format: Bitmap.CompressFormat = Bitmap.CompressFormat.JPEG, quality: Int = 92): File? = FileCore.saveBitmapToFolder(context, bitmap, folderName, filename, format, quality)
