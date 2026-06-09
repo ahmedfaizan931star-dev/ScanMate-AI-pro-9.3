@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.ImageNotSupported
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.PushPin
@@ -209,6 +210,12 @@ fun DocumentDetailScreen(
                 Toast.makeText(context, "OCR complete · ${state.qualityLabel}", Toast.LENGTH_SHORT).show()
                 viewModel.clearExportState()
             }
+            is ExportState.VaultSuccess -> {
+                isProcessing = false
+                exportProgress = null
+                Toast.makeText(context, "Moved ${state.itemCount} item(s) to Secure Vault", Toast.LENGTH_SHORT).show()
+                viewModel.clearExportState()
+            }
             is ExportState.QualitySuccess -> {
                 isProcessing = false
                 exportProgress = null
@@ -276,6 +283,17 @@ fun DocumentDetailScreen(
                             )
                         }
                         DropdownMenuItem(
+                            text = { Text("Move to Secure Vault") },
+                            leadingIcon = { Icon(Icons.Default.Lock, null) },
+                            onClick = {
+                                topBarMenuExpanded = false
+                                viewModel.moveDocumentToVault(documentWithPages) {
+                                    Toast.makeText(context, "Document moved to Secure Vault", Toast.LENGTH_SHORT).show()
+                                    onNavigateBack()
+                                }
+                            }
+                        )
+                        DropdownMenuItem(
                             text = { Text("Delete") },
                             leadingIcon = { Icon(Icons.Default.Delete, null) },
                             onClick = {
@@ -329,7 +347,13 @@ fun DocumentDetailScreen(
                     onExport = { showExportDialog = true },
                     onExportDocx = { viewModel.exportDocx(documentWithPages) },
                     onSignature = { onNavigateToSignature(docId) },
-                    onMeta = { showMetaDialog = true }
+                    onMeta = { showMetaDialog = true },
+                    onMoveVault = {
+                        viewModel.moveDocumentToVault(dwp) {
+                            Toast.makeText(context, "Document moved to Secure Vault", Toast.LENGTH_SHORT).show()
+                            onNavigateBack()
+                        }
+                    }
                 )
                 DocumentMetaChips(dwp)
                 DocumentInsightsCard(dwp)
@@ -669,7 +693,8 @@ private fun QuickActionRow(
     onExport: () -> Unit,
     onExportDocx: () -> Unit,
     onSignature: () -> Unit,
-    onMeta: () -> Unit
+    onMeta: () -> Unit,
+    onMoveVault: () -> Unit
 ) {
     LazyRow(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         item(key = "quick_pages") { AssistChip(onClick = {}, label = { Text("${dwp.pages.size} page${if (dwp.pages.size == 1) "" else "s"}") }) }
@@ -677,6 +702,7 @@ private fun QuickActionRow(
         item(key = "quick_export_pdf") { AssistChip(onClick = onExport, leadingIcon = { Icon(Icons.Default.PictureAsPdf, null, modifier = Modifier.size(16.dp)) }, label = { Text("Export PDF") }) }
         item(key = "quick_export_docx") { AssistChip(onClick = onExportDocx, leadingIcon = { Icon(Icons.Default.TextSnippet, null, modifier = Modifier.size(16.dp)) }, label = { Text("Export DOCX") }) }
         item(key = "quick_signature") { AssistChip(onClick = onSignature, leadingIcon = { Icon(Icons.Default.Style, null, modifier = Modifier.size(16.dp)) }, label = { Text("Signature") }) }
+        item(key = "quick_vault") { AssistChip(onClick = onMoveVault, leadingIcon = { Icon(Icons.Default.Lock, null, modifier = Modifier.size(16.dp)) }, label = { Text("Move to Vault") }) }
         item(key = "quick_tags") { AssistChip(onClick = onMeta, leadingIcon = { Icon(Icons.Default.Tag, null, modifier = Modifier.size(16.dp)) }, label = { Text("Tags") }) }
     }
 }
@@ -784,7 +810,7 @@ private fun OcrCard(dwp: DocumentWithPages, clipboardManager: ClipboardManager, 
                                 val file = EncryptedVaultUtils.saveEncryptedText(context, text, "OCR_${dwp.document.id}_${System.currentTimeMillis()}")
                                 if (file != null) Toast.makeText(context, "Saved to encrypted vault", Toast.LENGTH_SHORT).show() else Toast.makeText(context, "Vault save failed", Toast.LENGTH_SHORT).show()
                             }
-                        }) { Text("Vault") }
+                        }) { Text("Save text to vault") }
                     }
                 }
             }

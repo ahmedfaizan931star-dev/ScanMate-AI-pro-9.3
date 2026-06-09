@@ -163,7 +163,7 @@ fun CameraScreen(
     var isSaving by remember { mutableStateOf(false) }
     var isFinishing by remember { mutableStateOf(false) }
     var cameraError by remember { mutableStateOf<String?>(null) }
-    var autoDetectEnabled by remember { mutableStateOf(true) }
+    var autoDetectEnabled by remember { mutableStateOf(false) }
     var stableFrameCount by remember { mutableIntStateOf(0) }
     var analysisFrameCount by remember { mutableIntStateOf(0) }
     var lastAutoCaptureAt by remember { mutableStateOf(0L) }
@@ -173,7 +173,7 @@ fun CameraScreen(
     val hasLiveDetection = detectedCorners != null
     var selectedFilter by remember { mutableStateOf(FilterType.ORIGINAL) }
     val scannerHint = when {
-        !autoDetectEnabled -> "Manual mode · align the page"
+        !autoDetectEnabled -> "Manual mode · tap Auto edges when needed"
         analysisFrameCount == 0 -> "Starting edge detection…"
         !hasLiveDetection -> "Place the page inside the guide"
         currentConfidence >= 0.86f -> "Edges locked · hold steady"
@@ -243,7 +243,7 @@ fun CameraScreen(
                             }
 
                             val corners = detectedCorners
-                            if (corners != null && corners.size == 4 && currentConfidence >= 0.55f) {
+                            val processedFile = if (corners != null && corners.size == 4 && currentConfidence >= 0.55f) {
                                 FileUtils.applyPerspectiveCorrection(
                                     file = filteredFile,
                                     corners = corners,
@@ -253,6 +253,17 @@ fun CameraScreen(
                             } else {
                                 filteredFile
                             }
+                            val managedFile = FileUtils.moveFileToFolder(
+                                context = context,
+                                source = processedFile,
+                                folderName = "Scans",
+                                preferredName = "SCAN_${System.currentTimeMillis()}"
+                            ) ?: processedFile
+                            listOf(photoFile, qualityFile, filteredFile, processedFile)
+                                .distinctBy { it.absolutePath }
+                                .filter { it.absolutePath != managedFile.absolutePath && it.exists() && it.parentFile?.absolutePath == context.cacheDir.absolutePath }
+                                .forEach { runCatching { it.delete() } }
+                            managedFile
                         }
                         capturedImages.add(finalFile)
                         isSaving = false
