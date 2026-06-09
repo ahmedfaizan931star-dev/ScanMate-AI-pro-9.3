@@ -10,6 +10,7 @@ import com.synthbyte.scanmate.data.Page
 import com.synthbyte.scanmate.utils.PdfExportQuality
 import com.synthbyte.scanmate.utils.PdfPageSize
 import com.synthbyte.scanmate.utils.DocumentIntelligence
+import com.synthbyte.scanmate.utils.EncryptedVaultUtils
 import com.synthbyte.scanmate.utils.FileUtils
 import com.synthbyte.scanmate.utils.OcrHelper
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -30,6 +31,7 @@ sealed interface ExportState {
     data class PdfSuccess(val file: File) : ExportState
     data class DocxSuccess(val file: File) : ExportState
     data class OcrSuccess(val text: String, val qualityLabel: String) : ExportState
+    data class VaultSuccess(val itemCount: Int) : ExportState
     data class QualitySuccess(val report: DocumentIntelligence.QualityReport) : ExportState
     data class Error(val message: String) : ExportState
 }
@@ -229,6 +231,42 @@ class DocumentDetailViewModel @Inject constructor(
         runCatching { dao.updateOcrText(docId, text) }
             .onFailure { throwable -> publishError(throwable) }
     }
+
+    fun moveDocumentToVault(dwp: DocumentWithPages?, onMoved: () -> Unit = {}) = viewModelScope.launch {
+        runCatching {
+            if (dwp == null) {
+                publishErrorMessage("No document available for vault")
+                return@runCatching
+            }
+            val pageFiles = dwp.pages.sortedBy { it.pageOrder }
+                .map { File(it.imagePath) }
+                .filter { it.exists() && it.length() > 0L }
+            val ocrText = dwp.document.ocrText.orEmpty().trim().takeIf { it.isNotBlank() }
+            if (pageFiles.isEmpty() && ocrText == null) {
+                publishErrorMessage("Nothing to move to vault")
+                return@runCatching
+            }
+            _exportState.value = ExportState.Loading("Moving document to Secure Vault…")
+            val savedItems = withContext(Dispatchers.IO) {
+                EncryptedVaultUtils.saveDocumentBundle(
+                    context = context,
+                    documentTitle = dwp.document.title,
+                    sourceFiles = pageFiles,
+                    ocrText = ocrText,
+                    moveOriginals = true
+                )
+            }
+            val expectedMinimum = pageFiles.size + if (ocrText != null) 1 else 0
+            if (savedItems.size < expectedMinimum) {
+                publishErrorMessage("Vault move incomplete. Original files were kept where possible.")
+                return@runCatching
+            }
+            withContext(Dispatchers.IO) { dao.deleteDocumentById(dwp.document.id) }
+            _exportState.value = ExportState.VaultSuccess(savedItems.size)
+            withContext(Dispatchers.Main) { onMoved() }
+        }.onFailure { throwable -> publishError(throwable) }
+    }
+
 
     suspend fun updateOcrAndMetadata(text: String, currentWorkspace: String) = withContext(Dispatchers.IO) {
         dao.updateOcrText(docId, text)
