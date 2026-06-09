@@ -15,12 +15,6 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-/**
- * Android Keystore backed local vault for OCR text, generated files, scans and imported images.
- *
- * The vault uses AES-256-GCM and stores encrypted payloads inside app-managed storage:
- * ScanMate AI/Vault/*.vault. UI access is gated by biometric/device credential in VaultScreen.
- */
 object EncryptedVaultUtils {
     private const val ANDROID_KEYSTORE = "AndroidKeyStore"
     private const val KEY_ALIAS = "scanmate_ai_pro_local_vault"
@@ -76,6 +70,7 @@ object EncryptedVaultUtils {
                 bytes = sourceFile.readBytes(),
                 vaultBaseName = FileUtils.sanitizeFileBaseName(cleanDisplayName.substringBeforeLast('.'))
             ) ?: return@withContext null
+
             if (moveOriginal && vaultFile.exists() && vaultFile.length() > 0L) {
                 runCatching { sourceFile.delete() }
             }
@@ -90,7 +85,12 @@ object EncryptedVaultUtils {
         context: Context,
         sourceFile: File,
         displayName: String = sourceFile.name
-    ): File? = saveEncryptedFile(context, sourceFile, displayName, moveOriginal = true)
+    ): File? = saveEncryptedFile(
+        context = context,
+        sourceFile = sourceFile,
+        displayName = displayName,
+        moveOriginal = true
+    )
 
     suspend fun saveDocumentBundle(
         context: Context,
@@ -102,19 +102,33 @@ object EncryptedVaultUtils {
         val saved = mutableListOf<File>()
         val safeTitle = FileUtils.sanitizeFileBaseName(documentTitle.ifBlank { "ScanMate_Document" })
         val validFiles = sourceFiles.filter { it.exists() && it.length() > 0L }
+
         validFiles.forEachIndexed { index, file ->
-            val display = "${safeTitle}_page_${index + 1}.${file.extension.ifBlank { "jpg" }}"
-            val vaultFile = saveEncryptedFile(context, file, display, moveOriginal = false)
+            val extension = file.extension.ifBlank { "jpg" }
+            val display = "${safeTitle}_page_${index + 1}.$extension"
+            val vaultFile = saveEncryptedFile(
+                context = context,
+                sourceFile = file,
+                displayName = display,
+                moveOriginal = false
+            )
             if (vaultFile != null) saved += vaultFile
         }
+
         val cleanOcr = ocrText.orEmpty().trim()
         if (cleanOcr.isNotBlank()) {
-            saveEncryptedText(context, cleanOcr, "${safeTitle}_OCR_${System.currentTimeMillis()}")?.let { saved += it }
+            saveEncryptedText(
+                context = context,
+                text = cleanOcr,
+                filename = "${safeTitle}_OCR_${System.currentTimeMillis()}"
+            )?.let { saved += it }
         }
+
         val expectedMinimum = validFiles.size + if (cleanOcr.isNotBlank()) 1 else 0
         if (moveOriginals && saved.size >= expectedMinimum) {
             validFiles.forEach { file -> runCatching { file.delete() } }
         }
+
         saved
     }
 
@@ -191,12 +205,14 @@ object EncryptedVaultUtils {
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
         val encrypted = cipher.doFinal(bytes)
+
         val metadata = JSONObject()
             .put("displayName", displayName)
             .put("itemType", itemType)
             .put("mimeType", mimeType)
             .put("originalExtension", originalExtension)
             .put("createdAt", System.currentTimeMillis())
+
         val safeBase = FileUtils.sanitizeFileBaseName(vaultBaseName.ifBlank { "Vault_${System.currentTimeMillis()}" })
             .removeSuffix(".vault")
         var file = File(vaultDir, "$safeBase.vault")
@@ -205,12 +221,14 @@ object EncryptedVaultUtils {
             file = File(vaultDir, "${safeBase}_$counter.vault")
             counter += 1
         }
+
         val payload = listOf(
             VERSION_V2,
             Base64.encodeToString(metadata.toString().toByteArray(Charsets.UTF_8), Base64.NO_WRAP),
             Base64.encodeToString(cipher.iv, Base64.NO_WRAP),
             Base64.encodeToString(encrypted, Base64.NO_WRAP)
         ).joinToString("\n")
+
         file.writeText(payload, Charsets.UTF_8)
         return file.takeIf { it.exists() && it.length() > 0L }
     }
@@ -219,6 +237,7 @@ object EncryptedVaultUtils {
         val parts = file.readLines(Charsets.UTF_8)
         val iv: ByteArray
         val encrypted: ByteArray
+
         when {
             parts.size >= 4 && parts[0] == VERSION_V2 -> {
                 iv = Base64.decode(parts[2], Base64.NO_WRAP)
@@ -230,6 +249,7 @@ object EncryptedVaultUtils {
             }
             else -> return null
         }
+
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.DECRYPT_MODE, getOrCreateKey(), GCMParameterSpec(GCM_TAG_BITS, iv))
         return cipher.doFinal(encrypted)
@@ -249,9 +269,11 @@ object EncryptedVaultUtils {
             .setUserAuthenticationRequired(false)
             .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
             .setRandomizedEncryptionRequired(true)
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             builder.setUnlockedDeviceRequired(false)
         }
+
         keyGenerator.init(builder.build())
         return keyGenerator.generateKey()
     }
