@@ -3,6 +3,7 @@ package com.synthbyte.scanmate.ui.screens
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.graphics.Bitmap
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -36,19 +37,19 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.TextSnippet
-import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.RotateLeft
-import androidx.compose.material.icons.filled.RotateRight
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FilterAlt
 import androidx.compose.material.icons.filled.ImageNotSupported
 import androidx.compose.material.icons.filled.Restore
+import androidx.compose.material.icons.filled.RotateLeft
+import androidx.compose.material.icons.filled.RotateRight
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.TextSnippet
+import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
@@ -81,8 +82,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
@@ -94,16 +96,20 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.synthbyte.scanmate.ui.viewmodels.PageEditorViewModel
 import com.synthbyte.scanmate.data.Page
+import com.synthbyte.scanmate.ui.viewmodels.PageEditorViewModel
 import com.synthbyte.scanmate.utils.FileUtils
 import com.synthbyte.scanmate.utils.FilterType
 import com.synthbyte.scanmate.utils.OcrHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -129,17 +135,17 @@ fun PageEditorScreen(docId: Long, pageId: Long, onNavigateBack: () -> Unit) {
     var isProcessing by remember { mutableStateOf(false) }
     val isEditorProcessing = isProcessing || viewModelProcessing
     var changeVersion by remember { mutableIntStateOf(0) }
-    val undoStack = remember { mutableStateListOf<android.graphics.Bitmap>() }
-    val redoStack = remember { mutableStateListOf<android.graphics.Bitmap>() }
+    val undoStack = remember { mutableStateListOf<Bitmap>() }
+    val redoStack = remember { mutableStateListOf<Bitmap>() }
 
     fun pushUndoSnapshot() {
         workingBitmap?.let { bmp ->
             val maxSide = 900
             val scale = maxSide.toFloat() / maxOf(bmp.width, bmp.height).coerceAtLeast(1)
             val snapshot = if (scale >= 1f) {
-                bmp.copy(android.graphics.Bitmap.Config.ARGB_8888, false)
+                bmp.copy(Bitmap.Config.ARGB_8888, false)
             } else {
-                android.graphics.Bitmap.createScaledBitmap(
+                Bitmap.createScaledBitmap(
                     bmp,
                     (bmp.width * scale).toInt().coerceAtLeast(1),
                     (bmp.height * scale).toInt().coerceAtLeast(1),
@@ -184,6 +190,7 @@ fun PageEditorScreen(docId: Long, pageId: Long, onNavigateBack: () -> Unit) {
                 if (file != null && currentPage != null) {
                     sourcePath = null
                     viewModel.pushBitmap(null)
+                    clearUndoRedoStacks()
                     Toast.makeText(context, "Page replaced", Toast.LENGTH_SHORT).show()
                 } else {
                     Toast.makeText(context, "Could not replace this page", Toast.LENGTH_SHORT).show()
@@ -209,32 +216,38 @@ fun PageEditorScreen(docId: Long, pageId: Long, onNavigateBack: () -> Unit) {
                 title = { Text("Edit page", fontWeight = FontWeight.ExtraBold) },
                 navigationIcon = { IconButton(onClick = onNavigateBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
                 actions = {
-                    IconButton(onClick = {
-                        val path = page?.imagePath ?: return@IconButton
-                        scope.launch {
-                            isProcessing = true
-                            viewModel.loadPageBitmap(path)
-                            selectedFilter = FilterType.ORIGINAL
-                            clearUndoRedoStacks()
-                            isProcessing = false
-                        }
-                    }) { Icon(Icons.Default.Restore, "Reset") }
-                    IconButton(onClick = {
-                        val bitmap = workingBitmap ?: return@IconButton
-                        val currentPage = page ?: return@IconButton
-                        scope.launch {
-                            isProcessing = true
-                            val file = viewModel.saveEditedPage(currentPage.id, bitmap)
-                            if (file != null) {
-                                Toast.makeText(context, "Edited page saved", Toast.LENGTH_SHORT).show()
-                                sourcePath = null
-                                changeVersion++
-                            } else {
-                                Toast.makeText(context, "Could not save edited page", Toast.LENGTH_SHORT).show()
+                    IconButton(
+                        enabled = page?.imagePath != null && !isEditorProcessing,
+                        onClick = {
+                            val path = page?.imagePath ?: return@IconButton
+                            scope.launch {
+                                isProcessing = true
+                                viewModel.loadPageBitmap(path)
+                                selectedFilter = FilterType.ORIGINAL
+                                clearUndoRedoStacks()
+                                isProcessing = false
                             }
-                            isProcessing = false
                         }
-                    }) { Icon(Icons.Default.Save, "Save") }
+                    ) { Icon(Icons.Default.Restore, "Reset") }
+                    IconButton(
+                        enabled = workingBitmap != null && page != null && !isEditorProcessing,
+                        onClick = {
+                            val bitmap = workingBitmap ?: return@IconButton
+                            val currentPage = page ?: return@IconButton
+                            scope.launch {
+                                isProcessing = true
+                                val file = viewModel.saveEditedPage(currentPage.id, bitmap)
+                                if (file != null) {
+                                    Toast.makeText(context, "Edited page saved", Toast.LENGTH_SHORT).show()
+                                    sourcePath = null
+                                    changeVersion++
+                                } else {
+                                    Toast.makeText(context, "Could not save edited page", Toast.LENGTH_SHORT).show()
+                                }
+                                isProcessing = false
+                            }
+                        }
+                    ) { Icon(Icons.Default.Save, "Save") }
                 }
             )
         }
@@ -250,10 +263,10 @@ fun PageEditorScreen(docId: Long, pageId: Long, onNavigateBack: () -> Unit) {
             ) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("Make this page cleaner", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
-                    Text("Crop, rotate, enhance, OCR and save without leaving the document.", color = MaterialTheme.colorScheme.onPrimaryContainer, style = MaterialTheme.typography.bodyMedium)
+                    Text("Crop, rotate, enhance, OCR and save without overwriting the original until you confirm.", color = MaterialTheme.colorScheme.onPrimaryContainer, style = MaterialTheme.typography.bodyMedium)
                 }
             }
-            if (isProcessing) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            if (isEditorProcessing) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
 
             val bitmap = workingBitmap
             Card(
@@ -276,7 +289,15 @@ fun PageEditorScreen(docId: Long, pageId: Long, onNavigateBack: () -> Unit) {
                     ) {
                         if (page == null) CircularProgressIndicator() else Icon(Icons.Default.ImageNotSupported, null, modifier = Modifier.size(42.dp))
                         Spacer(modifier = Modifier.height(8.dp))
-                        Text(if (page == null) "Loading page..." else "This page image could not be loaded")
+                        val path = page?.imagePath
+                        Text(
+                            when {
+                                page == null -> "Loading page..."
+                                path.isNullOrBlank() -> "This page has no image path"
+                                !File(path).exists() -> "This page image is missing"
+                                else -> "This page image could not be loaded"
+                            }
+                        )
                     }
                 }
             }
@@ -286,46 +307,110 @@ fun PageEditorScreen(docId: Long, pageId: Long, onNavigateBack: () -> Unit) {
                     onClick = {
                         val previous = if (undoStack.isNotEmpty()) undoStack.removeAt(undoStack.lastIndex) else null
                         if (previous != null) {
-                            workingBitmap?.let { redoStack.add(it.copy(android.graphics.Bitmap.Config.ARGB_8888, false)) }
+                            workingBitmap?.let { redoStack.add(it.copy(Bitmap.Config.ARGB_8888, false)) }
                             viewModel.pushBitmap(previous)
                             selectedFilter = FilterType.ORIGINAL
                         }
                     },
-                    enabled = undoStack.isNotEmpty(),
+                    enabled = undoStack.isNotEmpty() && !isEditorProcessing,
                     modifier = Modifier.weight(1f)
                 ) { Text("Undo") }
                 OutlinedButton(
                     onClick = {
                         val next = if (redoStack.isNotEmpty()) redoStack.removeAt(redoStack.lastIndex) else null
                         if (next != null) {
-                            workingBitmap?.let { undoStack.add(it.copy(android.graphics.Bitmap.Config.ARGB_8888, false)) }
+                            workingBitmap?.let { undoStack.add(it.copy(Bitmap.Config.ARGB_8888, false)) }
                             viewModel.pushBitmap(next)
+                            selectedFilter = FilterType.ORIGINAL
                         }
                     },
-                    enabled = redoStack.isNotEmpty(),
+                    enabled = redoStack.isNotEmpty() && !isEditorProcessing,
                     modifier = Modifier.weight(1f)
                 ) { Text("Redo") }
             }
 
             ToolSectionTitle("Layout and crop")
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = {
-                    pushUndoSnapshot()
-                    workingBitmap?.let { viewModel.pushBitmap(FileUtils.rotateBitmap(it, -90f)) }
-                }, modifier = Modifier.weight(1f)) {
-                    Icon(Icons.Default.RotateLeft, null)
-                    Text(" Rotate left")
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                item(key = "save") {
+                    AssistChip(
+                        enabled = workingBitmap != null && page != null && !isEditorProcessing,
+                        onClick = {
+                            val bitmapToSave = workingBitmap ?: return@AssistChip
+                            val currentPage = page ?: return@AssistChip
+                            scope.launch {
+                                isProcessing = true
+                                val file = viewModel.saveEditedPage(currentPage.id, bitmapToSave)
+                                Toast.makeText(context, if (file != null) "Saved" else "Save failed", Toast.LENGTH_SHORT).show()
+                                if (file != null) {
+                                    sourcePath = null
+                                    changeVersion++
+                                }
+                                isProcessing = false
+                            }
+                        },
+                        label = { Text("Save") },
+                        leadingIcon = { Icon(Icons.Default.Save, null, Modifier.size(16.dp)) }
+                    )
                 }
-                OutlinedButton(onClick = {
-                    pushUndoSnapshot()
-                    workingBitmap?.let { viewModel.pushBitmap(FileUtils.rotateBitmap(it, 90f)) }
-                }, modifier = Modifier.weight(1f)) {
-                    Icon(Icons.Default.RotateRight, null)
-                    Text(" Rotate right")
+                item(key = "reset") {
+                    AssistChip(
+                        enabled = page?.imagePath != null && !isEditorProcessing,
+                        onClick = {
+                            val path = page?.imagePath ?: return@AssistChip
+                            scope.launch {
+                                isProcessing = true
+                                viewModel.loadPageBitmap(path)
+                                selectedFilter = FilterType.ORIGINAL
+                                clearUndoRedoStacks()
+                                isProcessing = false
+                            }
+                        },
+                        label = { Text("Reset") },
+                        leadingIcon = { Icon(Icons.Default.Restore, null, Modifier.size(16.dp)) }
+                    )
+                }
+                item(key = "crop") {
+                    AssistChip(
+                        enabled = workingBitmap != null && !isEditorProcessing,
+                        onClick = { showCropDialog = true },
+                        label = { Text("Crop") },
+                        leadingIcon = { Icon(Icons.Default.Crop, null, Modifier.size(16.dp)) }
+                    )
+                }
+                item(key = "corners") {
+                    AssistChip(
+                        enabled = workingBitmap != null && !isEditorProcessing,
+                        onClick = { showPerspectiveDialog = true },
+                        label = { Text("Corners") },
+                        leadingIcon = { Icon(Icons.Default.Crop, null, Modifier.size(16.dp)) }
+                    )
+                }
+                item(key = "rotate_left") {
+                    AssistChip(
+                        enabled = workingBitmap != null && !isEditorProcessing,
+                        onClick = {
+                            pushUndoSnapshot()
+                            workingBitmap?.let { viewModel.pushBitmap(FileUtils.rotateBitmap(it, -90f)) }
+                        },
+                        label = { Text("Rotate left") },
+                        leadingIcon = { Icon(Icons.Default.RotateLeft, null, Modifier.size(16.dp)) }
+                    )
+                }
+                item(key = "rotate_right") {
+                    AssistChip(
+                        enabled = workingBitmap != null && !isEditorProcessing,
+                        onClick = {
+                            pushUndoSnapshot()
+                            workingBitmap?.let { viewModel.pushBitmap(FileUtils.rotateBitmap(it, 90f)) }
+                        },
+                        label = { Text("Rotate right") },
+                        leadingIcon = { Icon(Icons.Default.RotateRight, null, Modifier.size(16.dp)) }
+                    )
                 }
             }
+
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { showCropDialog = true }, modifier = Modifier.weight(1f)) {
+                OutlinedButton(onClick = { showCropDialog = true }, enabled = workingBitmap != null && !isEditorProcessing, modifier = Modifier.weight(1f)) {
                     Icon(Icons.Default.Crop, null)
                     Text(" Manual crop")
                 }
@@ -335,15 +420,16 @@ fun PageEditorScreen(docId: Long, pageId: Long, onNavigateBack: () -> Unit) {
                         pushUndoSnapshot()
                         isProcessing = true
                         viewModel.pushBitmap(withContext(Dispatchers.Default) { FileUtils.autoCropDocument(current) })
+                        selectedFilter = FilterType.ORIGINAL
                         isProcessing = false
                     }
-                }, modifier = Modifier.weight(1f)) {
+                }, enabled = workingBitmap != null && !isEditorProcessing, modifier = Modifier.weight(1f)) {
                     Icon(Icons.Default.FilterAlt, null)
                     Text(" Auto crop")
                 }
             }
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { showPerspectiveDialog = true }, modifier = Modifier.weight(1f)) {
+                OutlinedButton(onClick = { showPerspectiveDialog = true }, enabled = workingBitmap != null && !isEditorProcessing, modifier = Modifier.weight(1f)) {
                     Icon(Icons.Default.Crop, null)
                     Text(" Adjust corners")
                 }
@@ -357,16 +443,16 @@ fun PageEditorScreen(docId: Long, pageId: Long, onNavigateBack: () -> Unit) {
                         selectedFilter = FilterType.ENHANCED_COLOR
                         isProcessing = false
                     }
-                }, modifier = Modifier.weight(1f)) {
+                }, enabled = workingBitmap != null && !isEditorProcessing, modifier = Modifier.weight(1f)) {
                     Text("Enhance")
                 }
             }
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { showWatermarkDialog = true }, modifier = Modifier.weight(1f)) {
+                OutlinedButton(onClick = { showWatermarkDialog = true }, enabled = workingBitmap != null && !isEditorProcessing, modifier = Modifier.weight(1f)) {
                     Text("Watermark")
                 }
-                OutlinedButton(onClick = { showNoteDialog = true }, modifier = Modifier.weight(1f)) {
+                OutlinedButton(onClick = { showNoteDialog = true }, enabled = workingBitmap != null && !isEditorProcessing, modifier = Modifier.weight(1f)) {
                     Text("Text note")
                 }
             }
@@ -376,6 +462,7 @@ fun PageEditorScreen(docId: Long, pageId: Long, onNavigateBack: () -> Unit) {
                 items(FilterType.entries, key = { it.name }) { filter ->
                     FilterChip(
                         selected = selectedFilter == filter,
+                        enabled = workingBitmap != null && !isEditorProcessing,
                         onClick = {
                             workingBitmap ?: return@FilterChip
                             scope.launch {
@@ -392,7 +479,7 @@ fun PageEditorScreen(docId: Long, pageId: Long, onNavigateBack: () -> Unit) {
                 item(key = "erase_marks_chip") {
                     FilterChip(
                         selected = false,
-                        enabled = !isEditorProcessing,
+                        enabled = workingBitmap != null && !isEditorProcessing,
                         onClick = {
                             pushUndoSnapshot()
                             viewModel.removeMarks()
@@ -404,7 +491,7 @@ fun PageEditorScreen(docId: Long, pageId: Long, onNavigateBack: () -> Unit) {
                 item(key = "remove_shadow_chip") {
                     FilterChip(
                         selected = false,
-                        enabled = !isEditorProcessing,
+                        enabled = workingBitmap != null && !isEditorProcessing,
                         onClick = {
                             pushUndoSnapshot()
                             viewModel.removeShadow()
@@ -416,7 +503,7 @@ fun PageEditorScreen(docId: Long, pageId: Long, onNavigateBack: () -> Unit) {
                 item(key = "deskew_chip") {
                     FilterChip(
                         selected = false,
-                        enabled = !isEditorProcessing,
+                        enabled = workingBitmap != null && !isEditorProcessing,
                         onClick = {
                             pushUndoSnapshot()
                             viewModel.deskew()
@@ -434,7 +521,7 @@ fun PageEditorScreen(docId: Long, pageId: Long, onNavigateBack: () -> Unit) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = {
                     replaceLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                }, modifier = Modifier.weight(1f)) {
+                }, enabled = !isEditorProcessing, modifier = Modifier.weight(1f)) {
                     Icon(Icons.Default.SwapHoriz, null)
                     Text(" Replace")
                 }
@@ -444,7 +531,7 @@ fun PageEditorScreen(docId: Long, pageId: Long, onNavigateBack: () -> Unit) {
                         viewModel.duplicatePage(currentPage)
                         Toast.makeText(context, "Page duplicated", Toast.LENGTH_SHORT).show()
                     }
-                }, modifier = Modifier.weight(1f)) {
+                }, enabled = page != null && !isEditorProcessing, modifier = Modifier.weight(1f)) {
                     Icon(Icons.Default.ContentCopy, null)
                     Text(" Duplicate")
                 }
@@ -456,21 +543,26 @@ fun PageEditorScreen(docId: Long, pageId: Long, onNavigateBack: () -> Unit) {
                         viewModel.movePage(currentPage, -1)
                         Toast.makeText(context, "Page moved", Toast.LENGTH_SHORT).show()
                     }
-                }, modifier = Modifier.weight(1f)) { Text("Move up") }
+                }, enabled = page != null && !isEditorProcessing, modifier = Modifier.weight(1f)) { Text("Move up") }
                 OutlinedButton(onClick = {
                     val currentPage = page ?: return@OutlinedButton
                     scope.launch {
                         viewModel.movePage(currentPage, 1)
                         Toast.makeText(context, "Page moved", Toast.LENGTH_SHORT).show()
                     }
-                }, modifier = Modifier.weight(1f)) { Text("Move down") }
+                }, enabled = page != null && !isEditorProcessing, modifier = Modifier.weight(1f)) { Text("Move down") }
             }
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = {
                     val currentPage = page ?: return@OutlinedButton
                     scope.launch {
+                        val imageFile = File(currentPage.imagePath)
+                        if (!imageFile.exists() || imageFile.length() == 0L) {
+                            Toast.makeText(context, "Page image is missing", Toast.LENGTH_SHORT).show()
+                            return@launch
+                        }
                         isProcessing = true
-                        val text = withContext(Dispatchers.IO) { OcrHelper.extractTextFromFile(context, java.io.File(currentPage.imagePath)) }
+                        val text = withContext(Dispatchers.IO) { OcrHelper.extractTextFromFile(context, imageFile) }
                         isProcessing = false
                         if (text.isBlank() || text.startsWith("OCR failed", ignoreCase = true)) {
                             Toast.makeText(context, "No readable text found on this page", Toast.LENGTH_SHORT).show()
@@ -480,16 +572,16 @@ fun PageEditorScreen(docId: Long, pageId: Long, onNavigateBack: () -> Unit) {
                             Toast.makeText(context, "Page OCR copied and saved", Toast.LENGTH_SHORT).show()
                         }
                     }
-                }, modifier = Modifier.weight(1f)) {
+                }, enabled = page != null && !isEditorProcessing, modifier = Modifier.weight(1f)) {
                     Icon(Icons.Default.TextSnippet, null)
                     Text(" OCR page")
                 }
-                OutlinedButton(onClick = { showDeleteDialog = true }, modifier = Modifier.weight(1f)) {
+                OutlinedButton(onClick = { showDeleteDialog = true }, enabled = page != null && !isEditorProcessing, modifier = Modifier.weight(1f)) {
                     Icon(Icons.Default.Delete, null)
                     Text(" Delete")
                 }
             }
-            AssistChip(onClick = {}, label = { Text("Save after crop, filter, text, watermark or rotation.") })
+            AssistChip(onClick = {}, label = { Text("Save confirms edits; Reset reloads the original saved page image.") })
         }
     }
 
@@ -500,6 +592,7 @@ fun PageEditorScreen(docId: Long, pageId: Long, onNavigateBack: () -> Unit) {
             onApply = { left, top, right, bottom ->
                 pushUndoSnapshot()
                 workingBitmap?.let { viewModel.pushBitmap(FileUtils.cropBitmapNormalized(it, left, top, right, bottom)) }
+                selectedFilter = FilterType.ORIGINAL
                 showCropDialog = false
             }
         )
@@ -557,9 +650,12 @@ fun PageEditorScreen(docId: Long, pageId: Long, onNavigateBack: () -> Unit) {
         PerspectiveDialog(
             bitmap = workingBitmap,
             onDismiss = { showPerspectiveDialog = false },
-            onApply = { tlx, tly, trx, tryY, brx, bry, blx, bly ->
+            onApply = { corners ->
                 pushUndoSnapshot()
-                workingBitmap?.let { viewModel.pushBitmap(FileUtils.perspectiveCorrectBitmapNormalized(it, tlx, tly, trx, tryY, brx, bry, blx, bly)) }
+                workingBitmap?.let { bitmap ->
+                    viewModel.pushBitmap(FileUtils.perspectiveCorrectBitmapFromCorners(bitmap, corners))
+                }
+                selectedFilter = FilterType.ORIGINAL
                 showPerspectiveDialog = false
             }
         )
@@ -593,46 +689,24 @@ private fun ToolSectionTitle(text: String) {
 
 @Composable
 private fun ManualCropDialog(
-    bitmap: android.graphics.Bitmap?,
+    bitmap: Bitmap?,
     onDismiss: () -> Unit,
     onApply: (Float, Float, Float, Float) -> Unit
 ) {
-    var left by remember { mutableFloatStateOf(0.04f) }
-    var top by remember { mutableFloatStateOf(0.04f) }
-    var right by remember { mutableFloatStateOf(0.04f) }
-    var bottom by remember { mutableFloatStateOf(0.04f) }
+    var crop by remember(bitmap?.width, bitmap?.height) { mutableStateOf(CropRectPercent.safeDefault()) }
     var selectedPreset by remember { mutableStateOf("balanced") }
-    val presets = listOf(
-        CropPreset("wide", "Wide", 0.02f),
-        CropPreset("balanced", "Balanced", 0.05f),
-        CropPreset("tight", "Tight", 0.09f)
-    )
-    val cropIsValid = remember(left, top, right, bottom) {
-        val visibleWidth = 1f - left - right
-        val visibleHeight = 1f - top - bottom
-        left in 0f..0.45f && top in 0f..0.45f && right in 0f..0.45f && bottom in 0f..0.45f &&
-            visibleWidth >= 0.30f && visibleHeight >= 0.30f
-    }
+    val cropIsValid = remember(crop) { crop.isValid() }
+    val presets = listOf("original" to "Original", "fit" to "Fit", "a4" to "A4", "letter" to "Letter")
 
-    fun setPreset(preset: CropPreset) {
-        selectedPreset = preset.id
-        val value = preset.value
-        left = value
-        top = value
-        right = value
-        bottom = value
-    }
-
-    fun fitPage() {
-        selectedPreset = "fit"
-        left = 0f
-        top = 0f
-        right = 0f
-        bottom = 0f
-    }
-
-    fun resetBalanced() {
-        setPreset(CropPreset("balanced", "Balanced", 0.05f))
+    fun applyPreset(id: String) {
+        selectedPreset = id
+        crop = when (id) {
+            "original" -> CropRectPercent(0f, 0f, 1f, 1f)
+            "fit" -> CropRectPercent(0.02f, 0.02f, 0.98f, 0.98f)
+            "a4" -> CropRectPercent.centerAspect(bitmap, if (bitmap != null && bitmap.width >= bitmap.height) 1.4142f else 1f / 1.4142f)
+            "letter" -> CropRectPercent.centerAspect(bitmap, if (bitmap != null && bitmap.width >= bitmap.height) 11f / 8.5f else 8.5f / 11f)
+            else -> CropRectPercent.safeDefault()
+        }.coerced()
     }
 
     Dialog(
@@ -642,9 +716,9 @@ private fun ManualCropDialog(
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(0.92f)
+                .fillMaxHeight(0.94f)
                 .padding(12.dp)
-                .widthIn(max = 640.dp),
+                .widthIn(max = 720.dp),
             shape = RoundedCornerShape(24.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
         ) {
@@ -658,44 +732,49 @@ private fun ManualCropDialog(
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text("Crop page", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                             Text(
-                                "Use a safe crop preset or fine tune each edge. The preview keeps extra margin so document content is not cut.",
+                                "Drag the large corner handles or use sliders. Presets are safe and keep the original image untouched until Save.",
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 style = MaterialTheme.typography.bodyMedium
                             )
                         }
                     }
                     item {
-                        CropPreviewBox(
+                        DraggableCropPreviewBox(
                             bitmap = bitmap,
-                            left = left,
-                            top = top,
-                            right = right,
-                            bottom = bottom,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(min = 260.dp)
+                            crop = crop,
+                            onCropChange = {
+                                crop = it.coerced()
+                                selectedPreset = "custom"
+                            },
+                            modifier = Modifier.fillMaxWidth().height(360.dp)
                         )
                     }
                     item {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                            presets.forEach { preset ->
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                            items(presets, key = { it.first }) { preset ->
                                 FilterChip(
-                                    selected = selectedPreset == preset.id,
-                                    onClick = { setPreset(preset) },
-                                    label = { Text(preset.label, softWrap = false, maxLines = 1) },
-                                    modifier = Modifier.weight(1f)
+                                    selected = selectedPreset == preset.first,
+                                    onClick = { applyPreset(preset.first) },
+                                    label = { Text(preset.second, softWrap = false, maxLines = 1) }
+                                )
+                            }
+                            item(key = "balanced") {
+                                FilterChip(
+                                    selected = selectedPreset == "balanced",
+                                    onClick = { selectedPreset = "balanced"; crop = CropRectPercent.safeDefault() },
+                                    label = { Text("Reset", softWrap = false, maxLines = 1) }
                                 )
                             }
                         }
                     }
-                    item { CropSlider("Left edge", left) { left = it; selectedPreset = "custom" } }
-                    item { CropSlider("Top edge", top) { top = it; selectedPreset = "custom" } }
-                    item { CropSlider("Right edge", right) { right = it; selectedPreset = "custom" } }
-                    item { CropSlider("Bottom edge", bottom) { bottom = it; selectedPreset = "custom" } }
+                    item { CropEdgeSlider("Left edge", crop.left, 0f..(crop.right - CropRectPercent.MinSize).coerceAtLeast(0f)) { crop = crop.copy(left = it).coerced(); selectedPreset = "custom" } }
+                    item { CropEdgeSlider("Top edge", crop.top, 0f..(crop.bottom - CropRectPercent.MinSize).coerceAtLeast(0f)) { crop = crop.copy(top = it).coerced(); selectedPreset = "custom" } }
+                    item { CropEdgeSlider("Right edge", 1f - crop.right, 0f..(1f - crop.left - CropRectPercent.MinSize).coerceAtLeast(0f)) { crop = crop.copy(right = 1f - it).coerced(); selectedPreset = "custom" } }
+                    item { CropEdgeSlider("Bottom edge", 1f - crop.bottom, 0f..(1f - crop.top - CropRectPercent.MinSize).coerceAtLeast(0f)) { crop = crop.copy(bottom = 1f - it).coerced(); selectedPreset = "custom" } }
                     if (!cropIsValid) {
                         item {
                             Text(
-                                "Crop is too tight. Keep at least 30% of page width and height visible.",
+                                "Crop is too tight. Keep at least 18% of page width and height visible.",
                                 color = MaterialTheme.colorScheme.error,
                                 style = MaterialTheme.typography.bodySmall
                             )
@@ -708,14 +787,14 @@ private fun ManualCropDialog(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TextButton(onClick = ::fitPage) { Text("Fit") }
-                        TextButton(onClick = ::resetBalanced) { Text("Reset") }
+                        TextButton(onClick = { applyPreset("original") }) { Text("Original") }
+                        TextButton(onClick = { selectedPreset = "balanced"; crop = CropRectPercent.safeDefault() }) { Text("Reset") }
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         TextButton(onClick = onDismiss) { Text("Cancel") }
                         Button(
-                            enabled = cropIsValid,
-                            onClick = { onApply(left, top, right, bottom) }
+                            enabled = cropIsValid && bitmap != null,
+                            onClick = { onApply(crop.left, crop.top, 1f - crop.right, 1f - crop.bottom) }
                         ) { Text("Apply crop") }
                     }
                 }
@@ -725,12 +804,10 @@ private fun ManualCropDialog(
 }
 
 @Composable
-private fun CropPreviewBox(
-    bitmap: android.graphics.Bitmap?,
-    left: Float,
-    top: Float,
-    right: Float,
-    bottom: Float,
+private fun DraggableCropPreviewBox(
+    bitmap: Bitmap?,
+    crop: CropRectPercent,
+    onCropChange: (CropRectPercent) -> Unit,
     modifier: Modifier = Modifier
 ) {
     BoxWithConstraints(
@@ -758,30 +835,166 @@ private fun CropPreviewBox(
         }
         val guideColor = MaterialTheme.colorScheme.primary
         val maskColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.68f)
+        val handleFill = MaterialTheme.colorScheme.primary
+        val handleStroke = MaterialTheme.colorScheme.surface
         Canvas(modifier = Modifier.fillMaxSize()) {
-            val cropLeft = imageLeft + imageWidth * left.coerceIn(0f, 0.45f)
-            val cropTop = imageTop + imageHeight * top.coerceIn(0f, 0.45f)
-            val cropRight = imageLeft + imageWidth * (1f - right.coerceIn(0f, 0.45f))
-            val cropBottom = imageTop + imageHeight * (1f - bottom.coerceIn(0f, 0.45f))
-            drawRect(maskColor, topLeft = Offset(imageLeft, imageTop), size = androidx.compose.ui.geometry.Size(imageWidth, (cropTop - imageTop).coerceAtLeast(0f)))
-            drawRect(maskColor, topLeft = Offset(imageLeft, cropBottom), size = androidx.compose.ui.geometry.Size(imageWidth, (imageTop + imageHeight - cropBottom).coerceAtLeast(0f)))
-            drawRect(maskColor, topLeft = Offset(imageLeft, cropTop), size = androidx.compose.ui.geometry.Size((cropLeft - imageLeft).coerceAtLeast(0f), (cropBottom - cropTop).coerceAtLeast(0f)))
-            drawRect(maskColor, topLeft = Offset(cropRight, cropTop), size = androidx.compose.ui.geometry.Size((imageLeft + imageWidth - cropRight).coerceAtLeast(0f), (cropBottom - cropTop).coerceAtLeast(0f)))
+            val cropLeft = imageLeft + imageWidth * crop.left
+            val cropTop = imageTop + imageHeight * crop.top
+            val cropRight = imageLeft + imageWidth * crop.right
+            val cropBottom = imageTop + imageHeight * crop.bottom
+            drawRect(maskColor, topLeft = Offset(imageLeft, imageTop), size = Size(imageWidth, (cropTop - imageTop).coerceAtLeast(0f)))
+            drawRect(maskColor, topLeft = Offset(imageLeft, cropBottom), size = Size(imageWidth, (imageTop + imageHeight - cropBottom).coerceAtLeast(0f)))
+            drawRect(maskColor, topLeft = Offset(imageLeft, cropTop), size = Size((cropLeft - imageLeft).coerceAtLeast(0f), (cropBottom - cropTop).coerceAtLeast(0f)))
+            drawRect(maskColor, topLeft = Offset(cropRight, cropTop), size = Size((imageLeft + imageWidth - cropRight).coerceAtLeast(0f), (cropBottom - cropTop).coerceAtLeast(0f)))
+            drawRect(guideColor.copy(alpha = 0.13f), topLeft = Offset(cropLeft, cropTop), size = Size((cropRight - cropLeft).coerceAtLeast(1f), (cropBottom - cropTop).coerceAtLeast(1f)))
             drawLine(guideColor, Offset(cropLeft, cropTop), Offset(cropRight, cropTop), strokeWidth = 5f)
             drawLine(guideColor, Offset(cropRight, cropTop), Offset(cropRight, cropBottom), strokeWidth = 5f)
             drawLine(guideColor, Offset(cropRight, cropBottom), Offset(cropLeft, cropBottom), strokeWidth = 5f)
             drawLine(guideColor, Offset(cropLeft, cropBottom), Offset(cropLeft, cropTop), strokeWidth = 5f)
+            listOf(
+                Offset(cropLeft, cropTop),
+                Offset(cropRight, cropTop),
+                Offset(cropRight, cropBottom),
+                Offset(cropLeft, cropBottom)
+            ).forEach { point ->
+                drawCircle(handleStroke, radius = 22f, center = point)
+                drawCircle(handleFill, radius = 16f, center = point)
+                drawCircle(handleStroke, radius = 16f, center = point, style = Stroke(width = 3f))
+            }
+        }
+        CropHandle.entries.forEach { handle ->
+            val point = crop.handlePoint(handle)
+            DragHandleBox(
+                position = point,
+                imageLeft = imageLeft,
+                imageTop = imageTop,
+                imageWidth = imageWidth,
+                imageHeight = imageHeight,
+                contentDescription = handle.label,
+                onDelta = { delta -> onCropChange(crop.drag(handle, delta)) }
+            )
         }
     }
 }
 
-private data class CropPreset(val id: String, val label: String, val value: Float)
+@Composable
+private fun DragHandleBox(
+    position: Offset,
+    imageLeft: Float,
+    imageTop: Float,
+    imageWidth: Float,
+    imageHeight: Float,
+    contentDescription: String,
+    onDelta: (Offset) -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .offset {
+                IntOffset(
+                    (imageLeft + position.x * imageWidth).roundToInt() - 36,
+                    (imageTop + position.y * imageHeight).roundToInt() - 36
+                )
+            }
+            .size(72.dp)
+            .pointerInput(imageWidth, imageHeight, contentDescription) {
+                detectDragGestures { change, dragAmount ->
+                    change.consume()
+                    onDelta(
+                        Offset(
+                            dragAmount.x / imageWidth.coerceAtLeast(1f),
+                            dragAmount.y / imageHeight.coerceAtLeast(1f)
+                        )
+                    )
+                }
+            }
+    )
+}
+
+@Composable
+private fun CropEdgeSlider(label: String, value: Float, valueRange: ClosedFloatingPointRange<Float>, onChange: (Float) -> Unit) {
+    val safeEnd = valueRange.endInclusive.coerceAtLeast(valueRange.start + 0.001f)
+    val safeRange = valueRange.start..safeEnd
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(label, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+            Text("${(value * 100f).roundToInt()}%", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Slider(value = value.coerceIn(safeRange.start, safeRange.endInclusive), onValueChange = onChange, valueRange = safeRange)
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("Keep more", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Trim more", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+private enum class CropHandle(val label: String) {
+    TopLeft("Top left"),
+    TopRight("Top right"),
+    BottomRight("Bottom right"),
+    BottomLeft("Bottom left")
+}
+
+private data class CropRectPercent(
+    val left: Float,
+    val top: Float,
+    val right: Float,
+    val bottom: Float
+) {
+    fun isValid(): Boolean =
+        left in 0f..1f && top in 0f..1f && right in 0f..1f && bottom in 0f..1f &&
+            right - left >= MinSize && bottom - top >= MinSize
+
+    fun coerced(): CropRectPercent {
+        val safeLeft = left.coerceIn(0f, 1f - MinSize)
+        val safeTop = top.coerceIn(0f, 1f - MinSize)
+        val safeRight = right.coerceIn(safeLeft + MinSize, 1f)
+        val safeBottom = bottom.coerceIn(safeTop + MinSize, 1f)
+        return CropRectPercent(safeLeft, safeTop, safeRight, safeBottom)
+    }
+
+    fun handlePoint(handle: CropHandle): Offset = when (handle) {
+        CropHandle.TopLeft -> Offset(left, top)
+        CropHandle.TopRight -> Offset(right, top)
+        CropHandle.BottomRight -> Offset(right, bottom)
+        CropHandle.BottomLeft -> Offset(left, bottom)
+    }
+
+    fun drag(handle: CropHandle, delta: Offset): CropRectPercent = when (handle) {
+        CropHandle.TopLeft -> copy(left = left + delta.x, top = top + delta.y)
+        CropHandle.TopRight -> copy(right = right + delta.x, top = top + delta.y)
+        CropHandle.BottomRight -> copy(right = right + delta.x, bottom = bottom + delta.y)
+        CropHandle.BottomLeft -> copy(left = left + delta.x, bottom = bottom + delta.y)
+    }.coerced()
+
+    companion object {
+        const val MinSize = 0.18f
+
+        fun safeDefault(): CropRectPercent = CropRectPercent(0.04f, 0.04f, 0.96f, 0.96f)
+
+        fun centerAspect(bitmap: Bitmap?, targetAspect: Float): CropRectPercent {
+            val aspect = targetAspect.coerceIn(0.25f, 4f)
+            val imageAspect = bitmap?.let { it.width.toFloat() / it.height.toFloat().coerceAtLeast(1f) } ?: aspect
+            val width: Float
+            val height: Float
+            if (imageAspect > aspect) {
+                height = 0.96f
+                width = (height * aspect / imageAspect).coerceIn(MinSize, 0.96f)
+            } else {
+                width = 0.96f
+                height = (width * imageAspect / aspect).coerceIn(MinSize, 0.96f)
+            }
+            val left = (1f - width) / 2f
+            val top = (1f - height) / 2f
+            return CropRectPercent(left, top, left + width, top + height).coerced()
+        }
+    }
+}
 
 @Composable
 private fun PerspectiveDialog(
-    bitmap: android.graphics.Bitmap?,
+    bitmap: Bitmap?,
     onDismiss: () -> Unit,
-    onApply: (Float, Float, Float, Float, Float, Float, Float, Float) -> Unit
+    onApply: (List<Offset>) -> Unit
 ) {
     val defaultCorners = listOf(
         Offset(0.06f, 0.06f),
@@ -795,7 +1008,7 @@ private fun PerspectiveDialog(
         Offset(0.98f, 0.98f),
         Offset(0.02f, 0.98f)
     )
-    var corners by remember { mutableStateOf(defaultCorners) }
+    var corners by remember(bitmap?.width, bitmap?.height) { mutableStateOf(defaultCorners) }
     var activeCorner by remember { mutableStateOf<Int?>(null) }
     val isValid = remember(corners) { cornersAreValid(corners) }
 
@@ -815,7 +1028,7 @@ private fun PerspectiveDialog(
             Column(modifier = Modifier.fillMaxSize().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("Drag page corners", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                    Text("Place each large handle on the real document corner. Handles stay inside bounds and cannot cross.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Place each large handle on the real document corner. This is manual and will not be overwritten by auto crop.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 BoxWithConstraints(
                     modifier = Modifier
@@ -854,27 +1067,26 @@ private fun PerspectiveDialog(
                         drawLine(guideColor, points[2], points[3], strokeWidth = 5f)
                         drawLine(guideColor, points[3], points[0], strokeWidth = 5f)
                         points.forEachIndexed { index, point ->
-                            val radius = if (activeCorner == index) 28f else 23f
+                            val radius = if (activeCorner == index) 30f else 23f
                             drawCircle(handleBorder, radius = radius + 7f, center = point)
                             drawCircle(handleColor, radius = radius, center = point)
                             drawCircle(handleBorder, radius = radius, center = point, style = Stroke(width = 4f))
                         }
                     }
                     corners.forEachIndexed { index, point ->
-                        CornerHandle(
+                        PerspectiveCornerHandle(
                             position = point,
                             imageLeft = imageLeft,
                             imageTop = imageTop,
                             imageWidth = imageWidth,
                             imageHeight = imageHeight,
-                            onDragStateChange = { dragging -> activeCorner = if (dragging) index else null }
-                        ) { next ->
-                            corners = corners.updateCorner(index, next)
-                        }
+                            onDragStateChange = { dragging -> activeCorner = if (dragging) index else null },
+                            onDelta = { delta -> corners = corners.updateCornerByDelta(index, delta) }
+                        )
                     }
                 }
                 Text(
-                    text = if (isValid) "Tip: drag slowly near each corner for better OCR/export alignment." else "Move the handles apart so the page outline does not cross or become too small.",
+                    text = if (isValid) "Tip: drag handles directly. Apply uses these exact selected corners." else "Move the handles apart so the page outline does not cross or become too small.",
                     color = if (isValid) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodySmall
                 )
@@ -891,22 +1103,7 @@ private fun PerspectiveDialog(
                         TextButton(onClick = onDismiss) { Text("Cancel") }
                         Button(
                             enabled = isValid && bitmap != null,
-                            onClick = {
-                                val topLeft = corners[0]
-                                val topRight = corners[1]
-                                val bottomRight = corners[2]
-                                val bottomLeft = corners[3]
-                                onApply(
-                                    topLeft.x,
-                                    topLeft.y,
-                                    1f - topRight.x,
-                                    topRight.y,
-                                    1f - bottomRight.x,
-                                    1f - bottomRight.y,
-                                    bottomLeft.x,
-                                    1f - bottomLeft.y
-                                )
-                            }
+                            onClick = { onApply(corners) }
                         ) { Text("Apply") }
                     }
                 }
@@ -916,59 +1113,50 @@ private fun PerspectiveDialog(
 }
 
 @Composable
-private fun CornerHandle(
+private fun PerspectiveCornerHandle(
     position: Offset,
     imageLeft: Float,
     imageTop: Float,
     imageWidth: Float,
     imageHeight: Float,
     onDragStateChange: (Boolean) -> Unit = {},
-    onMove: (Offset) -> Unit
+    onDelta: (Offset) -> Unit
 ) {
     Box(
         modifier = Modifier
             .offset {
                 IntOffset(
-                    (imageLeft + position.x * imageWidth).roundToInt() - 34,
-                    (imageTop + position.y * imageHeight).roundToInt() - 34
+                    (imageLeft + position.x * imageWidth).roundToInt() - 38,
+                    (imageTop + position.y * imageHeight).roundToInt() - 38
                 )
             }
-            .size(68.dp)
-            .pointerInput(position) {
+            .size(76.dp)
+            .pointerInput(imageWidth, imageHeight) {
                 detectDragGestures(
                     onDragStart = { onDragStateChange(true) },
                     onDragCancel = { onDragStateChange(false) },
                     onDragEnd = { onDragStateChange(false) }
                 ) { change, dragAmount ->
                     change.consume()
-                    val next = Offset(
-                        (position.x + dragAmount.x / imageWidth.coerceAtLeast(1f)).coerceIn(0.02f, 0.98f),
-                        (position.y + dragAmount.y / imageHeight.coerceAtLeast(1f)).coerceIn(0.02f, 0.98f)
+                    onDelta(
+                        Offset(
+                            dragAmount.x / imageWidth.coerceAtLeast(1f),
+                            dragAmount.y / imageHeight.coerceAtLeast(1f)
+                        )
                     )
-                    onMove(next)
                 }
             }
     )
 }
 
-@Composable
-private fun CropSlider(label: String, value: Float, onChange: (Float) -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(label, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
-            Text("${(value * 100f).roundToInt()}%", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        Slider(value = value, onValueChange = onChange, valueRange = 0f..0.22f)
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("Keep more", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("Trim more", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
+private fun List<Offset>.updateCornerByDelta(index: Int, delta: Offset): List<Offset> {
+    if (size != 4) return this
+    return updateCorner(index, this[index] + delta)
 }
 
 private fun List<Offset>.updateCorner(index: Int, next: Offset): List<Offset> {
     if (size != 4) return this
-    val minGap = 0.08f
+    val minGap = 0.06f
     fun Float.inRange(min: Float, max: Float): Float {
         val low = min.coerceIn(0.02f, 0.98f)
         val high = max.coerceIn(0.02f, 0.98f)
@@ -1004,10 +1192,10 @@ private fun cornersAreValid(corners: List<Offset>): Boolean {
     val bottomWidth = distance(corners[3], corners[2])
     val leftHeight = distance(corners[0], corners[3])
     val rightHeight = distance(corners[1], corners[2])
-    val aspect = maxOf(topWidth, bottomWidth) / maxOf(leftHeight, rightHeight, 0.001f)
-    return area >= 0.12f &&
-        aspect in 0.22f..4.8f &&
-        topWidth >= 0.16f && bottomWidth >= 0.16f && leftHeight >= 0.16f && rightHeight >= 0.16f &&
+    val aspect = max(topWidth, bottomWidth) / max(max(leftHeight, rightHeight), 0.001f)
+    return area >= 0.10f &&
+        aspect in 0.20f..5.0f &&
+        topWidth >= 0.12f && bottomWidth >= 0.12f && leftHeight >= 0.12f && rightHeight >= 0.12f &&
         corners[0].x < corners[1].x &&
         corners[3].x < corners[2].x &&
         corners[0].y < corners[3].y &&
@@ -1017,7 +1205,7 @@ private fun cornersAreValid(corners: List<Offset>): Boolean {
 private fun distance(a: Offset, b: Offset): Float {
     val dx = a.x - b.x
     val dy = a.y - b.y
-    return kotlin.math.sqrt(dx * dx + dy * dy)
+    return sqrt(dx * dx + dy * dy)
 }
 
 private fun segmentsIntersect(a: Offset, b: Offset, c: Offset, d: Offset): Boolean {

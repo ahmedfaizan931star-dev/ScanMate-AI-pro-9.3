@@ -6,7 +6,8 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.widget.Toast
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -69,6 +70,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.key
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -825,7 +827,10 @@ private fun PageThumbnails(pages: List<Page>, onEdit: (Page) -> Unit) {
         LazyRow(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             items(pages, key = { it.id }) { page ->
                 val bitmap by androidx.compose.runtime.produceState<Bitmap?>(null, page.imagePath) {
-                    value = withContext(Dispatchers.IO) { FileUtils.decodeSampledBitmap(page.imagePath, 360, 360) }
+                    value = withContext(Dispatchers.IO) {
+                        val file = File(page.imagePath)
+                        if (file.exists() && file.length() > 0L) FileUtils.decodeSampledBitmap(page.imagePath, 360, 360) else null
+                    }
                 }
                 Card(onClick = { onEdit(page) }, shape = RoundedCornerShape(16.dp)) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -833,7 +838,7 @@ private fun PageThumbnails(pages: List<Page>, onEdit: (Page) -> Unit) {
                             Image(bitmap = bitmap!!.asImageBitmap(), contentDescription = "Thumbnail", modifier = Modifier.size(112.dp), contentScale = ContentScale.Crop)
                         } else {
                             Box(modifier = Modifier.size(112.dp), contentAlignment = Alignment.Center) {
-                                CircularProgressIndicator()
+                                Icon(Icons.Default.ImageNotSupported, contentDescription = "Image missing")
                             }
                         }
                         Text("Page ${page.pageOrder + 1}", modifier = Modifier.padding(bottom = 8.dp), style = MaterialTheme.typography.bodySmall)
@@ -856,70 +861,114 @@ private fun PageManagementList(
     val orderedPages = remember { mutableStateListOf<Page>() }
     var activePageId by remember { mutableStateOf<Long?>(null) }
     var dragOffsetY by remember { mutableFloatStateOf(0f) }
+    var reorderDirty by remember { mutableStateOf(false) }
     val haptics = LocalHapticFeedback.current
-    val itemHeightPx = with(LocalDensity.current) { 76.dp.toPx() }
+    val itemStepPx = with(LocalDensity.current) { 72.dp.toPx() }
 
     LaunchedEffect(pages.map { it.id to it.pageOrder }) {
-        orderedPages.clear()
-        orderedPages.addAll(pages.sortedBy { it.pageOrder })
+        if (activePageId == null) {
+            orderedPages.clear()
+            orderedPages.addAll(pages.sortedBy { it.pageOrder })
+            reorderDirty = false
+            dragOffsetY = 0f
+        }
+    }
+
+    fun moveDragged(pageId: Long, direction: Int) {
+        val currentIndex = orderedPages.indexOfFirst { it.id == pageId }
+        if (currentIndex < 0) return
+        val newIndex = (currentIndex + direction).coerceIn(0, orderedPages.lastIndex)
+        if (currentIndex == newIndex) return
+        val page = orderedPages.removeAt(currentIndex)
+        orderedPages.add(newIndex, page)
+        reorderDirty = true
+        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+    }
+
+    fun finishDrag() {
+        val changed = reorderDirty
+        activePageId = null
+        dragOffsetY = 0f
+        reorderDirty = false
+        if (changed) {
+            onReorder(orderedPages.mapIndexed { index, page -> page.copy(pageOrder = index) })
+        }
     }
 
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Page management", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-        Text("Long-press a page row and drag up/down to reorder. Arrow buttons stay as a safe fallback.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+        Text("Drag the handle on the left to reorder. Arrow buttons remain as a reliable fallback.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
         orderedPages.forEachIndexed { index, page ->
-            val offsetY = if (activePageId == page.id) dragOffsetY.roundToInt() else 0
-            Card(
-                shape = RoundedCornerShape(18.dp),
-                colors = CardDefaults.cardColors(containerColor = if (activePageId == page.id) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .offset { IntOffset(0, offsetY) }
-                    .zIndex(if (activePageId == page.id) 1f else 0f)
-                    .pointerInput(orderedPages.size, page.id) {
-                        detectDragGesturesAfterLongPress(
-                            onDragStart = {
-                                activePageId = page.id
-                                dragOffsetY = 0f
-                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                            },
-                            onDragCancel = {
-                                activePageId = null
-                                dragOffsetY = 0f
-                            },
-                            onDragEnd = {
-                                activePageId = null
-                                dragOffsetY = 0f
-                                onReorder(orderedPages.toList())
-                            },
-                            onDrag = { change, dragAmount ->
-                                change.consume()
-                                if (activePageId == page.id) {
-                                    dragOffsetY += dragAmount.y
-                                    val currentIndex = orderedPages.indexOfFirst { it.id == page.id }
-                                    if (dragOffsetY > itemHeightPx && currentIndex in 0 until orderedPages.lastIndex) {
-                                        orderedPages.removeAt(currentIndex)
-                                        orderedPages.add(currentIndex + 1, page)
-                                        dragOffsetY -= itemHeightPx
-                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    } else if (dragOffsetY < -itemHeightPx && currentIndex > 0) {
-                                        orderedPages.removeAt(currentIndex)
-                                        orderedPages.add(currentIndex - 1, page)
-                                        dragOffsetY += itemHeightPx
-                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+            key(page.id) {
+                val isActive = activePageId == page.id
+                val offsetY = if (isActive) dragOffsetY.roundToInt() else 0
+                Card(
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.cardColors(containerColor = if (isActive) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .offset { IntOffset(0, offsetY) }
+                        .zIndex(if (isActive) 1f else 0f)
+                ) {
+                    Row(modifier = Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(14.dp))
+                                .pointerInput(orderedPages.size, page.id) {
+                                    detectDragGestures(
+                                        onDragStart = {
+                                            activePageId = page.id
+                                            dragOffsetY = 0f
+                                            reorderDirty = false
+                                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        },
+                                        onDragCancel = {
+                                            activePageId = null
+                                            dragOffsetY = 0f
+                                            reorderDirty = false
+                                        },
+                                        onDragEnd = { finishDrag() }
+                                    ) { change, dragAmount ->
+                                        change.consume()
+                                        if (activePageId == page.id) {
+                                            dragOffsetY += dragAmount.y
+                                            while (dragOffsetY > itemStepPx * 0.55f) {
+                                                val before = orderedPages.indexOfFirst { it.id == page.id }
+                                                moveDragged(page.id, 1)
+                                                val after = orderedPages.indexOfFirst { it.id == page.id }
+                                                if (before == after) break
+                                                dragOffsetY -= itemStepPx
+                                            }
+                                            while (dragOffsetY < -itemStepPx * 0.55f) {
+                                                val before = orderedPages.indexOfFirst { it.id == page.id }
+                                                moveDragged(page.id, -1)
+                                                val after = orderedPages.indexOfFirst { it.id == page.id }
+                                                if (before == after) break
+                                                dragOffsetY += itemStepPx
+                                            }
+                                        }
                                     }
-                                }
-                            }
-                        )
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("☰", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Page ${index + 1}", fontWeight = FontWeight.SemiBold)
+                            Text(
+                                if (File(page.imagePath).exists()) "Ready" else "Image missing",
+                                color = if (File(page.imagePath).exists()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                        IconButton(onClick = { onMove(page, -1) }) { Icon(Icons.Default.KeyboardArrowUp, "Move up") }
+                        IconButton(onClick = { onMove(page, 1) }) { Icon(Icons.Default.KeyboardArrowDown, "Move down") }
+                        IconButton(onClick = { onDuplicate(page) }) { Icon(Icons.Default.ContentCopy, "Duplicate") }
+                        IconButton(onClick = { onEdit(page) }) { Icon(Icons.Default.Edit, "Edit") }
+                        IconButton(onClick = { onDelete(page) }) { Icon(Icons.Default.Delete, "Delete") }
                     }
-            ) {
-                Row(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Page ${index + 1}", fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                    IconButton(onClick = { onMove(page, -1) }) { Icon(Icons.Default.KeyboardArrowUp, "Move up") }
-                    IconButton(onClick = { onMove(page, 1) }) { Icon(Icons.Default.KeyboardArrowDown, "Move down") }
-                    IconButton(onClick = { onDuplicate(page) }) { Icon(Icons.Default.ContentCopy, "Duplicate") }
-                    IconButton(onClick = { onEdit(page) }) { Icon(Icons.Default.Edit, "Edit") }
-                    IconButton(onClick = { onDelete(page) }) { Icon(Icons.Default.Delete, "Delete") }
                 }
             }
         }
