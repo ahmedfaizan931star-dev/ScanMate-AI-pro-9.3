@@ -90,6 +90,12 @@ interface DocDao {
     @Query("UPDATE documents SET category = :category, tags = :tags, workspace = :workspace, updatedAt = :updatedAt WHERE id = :id")
     suspend fun updateCategoryTags(id: Long, category: String, tags: String, workspace: String = "Inbox", updatedAt: Long = System.currentTimeMillis())
 
+    @Query("UPDATE documents SET updatedAt = :updatedAt WHERE id = :id")
+    suspend fun touchDocument(id: Long, updatedAt: Long = System.currentTimeMillis())
+
+    @Query("UPDATE documents SET updatedAt = :updatedAt WHERE id = (SELECT documentId FROM pages WHERE id = :pageId LIMIT 1)")
+    suspend fun touchDocumentForPage(pageId: Long, updatedAt: Long = System.currentTimeMillis())
+
     @Query("DELETE FROM documents WHERE id = :id")
     suspend fun deleteDocumentById(id: Long)
 
