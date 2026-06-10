@@ -307,19 +307,36 @@ object OcrHelper {
 
     private fun buildOcrCandidates(source: Bitmap): List<Pair<String, Bitmap>> {
         val result = mutableListOf<Pair<String, Bitmap>>()
-        val deskewed = estimateSkewAndRotate(source)
-        val scaled = deskewed.scaleDownToMax(OCR_MAX_SIDE)
-        val base = scaled.copy(Bitmap.Config.ARGB_8888, false)
-        result += "deskewed" to base
-        runCatching { ImageProcessor.enhanceForOcr(base) }.getOrNull()?.let { result += "document-clean" to it }
-        runCatching { FileUtils.applyFilter(base, FilterType.BOOK_PAGE) }.getOrNull()?.let { result += "book-page" to it }
-        runCatching { FileUtils.applyFilter(base, FilterType.SHARP_SCAN) }.getOrNull()?.let { result += "sharp-scan" to it }
-        val gray = toGrayscaleBitmap(base)
-        result += "grayscale" to gray
-        runCatching { adaptiveBinarizeBitmap(gray) }.getOrNull()?.let { result += "adaptive-bw" to it }
-        runCatching { FileUtils.applyFilter(gray, FilterType.HIGH_CONTRAST) }.getOrNull()?.let { result += "high-contrast" to it }
-        if (scaled !== source && scaled !== deskewed && !scaled.isRecycled) runCatching { scaled.recycle() }
-        if (deskewed !== source && deskewed !== scaled && !deskewed.isRecycled) runCatching { deskewed.recycle() }
+        val rotations = listOf(
+            "normal" to 0f,
+            "upside-down" to 180f,
+            "rotate-right" to 90f,
+            "rotate-left" to 270f
+        )
+
+        for ((rotationLabel, degrees) in rotations) {
+            val oriented = if (degrees == 0f) source else rotate(source, degrees)
+            val deskewed = estimateSkewAndRotate(oriented)
+            val scaled = deskewed.scaleDownToMax(OCR_MAX_SIDE)
+            val base = scaled.copy(Bitmap.Config.ARGB_8888, false)
+
+            result += "$rotationLabel-base" to base
+            runCatching { ImageProcessor.enhanceForOcr(base) }.getOrNull()?.let { result += "$rotationLabel-document-clean" to it }
+            runCatching { FileUtils.applyFilter(base, FilterType.BOOK_PAGE) }.getOrNull()?.let { result += "$rotationLabel-book-page" to it }
+            runCatching { FileUtils.applyFilter(base, FilterType.SHARP_SCAN) }.getOrNull()?.let { result += "$rotationLabel-sharp-scan" to it }
+
+            if (degrees == 0f || degrees == 180f) {
+                val gray = toGrayscaleBitmap(base)
+                result += "$rotationLabel-grayscale" to gray
+                runCatching { adaptiveBinarizeBitmap(gray) }.getOrNull()?.let { result += "$rotationLabel-adaptive-bw" to it }
+                runCatching { FileUtils.applyFilter(gray, FilterType.HIGH_CONTRAST) }.getOrNull()?.let { result += "$rotationLabel-high-contrast" to it }
+            }
+
+            if (scaled !== source && scaled !== oriented && scaled !== deskewed && !scaled.isRecycled) runCatching { scaled.recycle() }
+            if (deskewed !== source && deskewed !== oriented && deskewed !== scaled && !deskewed.isRecycled) runCatching { deskewed.recycle() }
+            if (oriented !== source && oriented !== deskewed && oriented !== scaled && !oriented.isRecycled) runCatching { oriented.recycle() }
+        }
+
         return result.distinctBy { (_, bitmap) -> System.identityHashCode(bitmap) }
     }
 
@@ -330,12 +347,17 @@ object OcrHelper {
         val wordScore = min(result.wordCount, 260) * 0.34
         val confidenceScore = result.confidencePercent * 1.18
         val structureBonus = clean.count { it == '\n' }.coerceAtMost(24) * 0.45
-        val englishBonus = listOf("system", "computer", "hardware", "software", "component", "example", "function")
+        val englishBonus = listOf("system", "computer", "hardware", "software", "component", "example", "function", "question", "answer", "chapter", "definition")
             .count { clean.contains(it, ignoreCase = true) } * 2.2
+        val readingOrderBonus = Regex("(?i)\\b(q\\.?|question|chapter|unit|definition|examples?)\\b").findAll(clean)
+            .count()
+            .coerceAtMost(10) * 1.4
+        val upsideDownPenalty = listOf("uoitseuq", "retpahc", "metsys", "retupmoc", "elpmaxe", "noitinifed")
+            .count { clean.contains(it, ignoreCase = true) } * 14.0
         val noisePenalty = clean.count { it == '�' || it == '¤' || it == '|' }.coerceAtMost(30) * 1.5 +
             Regex("[A-Za-z][0-9][A-Za-z]").findAll(clean).count().coerceAtMost(18) * 1.7 +
             Regex("[A-Z]{2}[a-z]{2,}").findAll(clean).count().coerceAtMost(18) * 0.7
-        return confidenceScore + wordScore + textLengthScore + structureBonus + englishBonus - noisePenalty
+        return confidenceScore + wordScore + textLengthScore + structureBonus + englishBonus + readingOrderBonus - upsideDownPenalty - noisePenalty
     }
 
     private fun toGrayscaleBitmap(source: Bitmap): Bitmap {

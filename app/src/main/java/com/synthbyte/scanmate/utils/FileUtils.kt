@@ -30,6 +30,7 @@ object FileUtils {
     fun cropBitmapNormalized(source: Bitmap, leftPercent: Float, topPercent: Float, rightPercent: Float, bottomPercent: Float): Bitmap = ImageProcessor.cropBitmapNormalized(source, leftPercent, topPercent, rightPercent, bottomPercent)
     fun autoCropDocument(source: Bitmap): Bitmap = ImageProcessor.autoCropDocument(source)
     fun perspectiveCorrectBitmapNormalized(source: Bitmap, topLeftX: Float, topLeftY: Float, topRightX: Float, topRightY: Float, bottomRightX: Float, bottomRightY: Float, bottomLeftX: Float, bottomLeftY: Float): Bitmap = ImageProcessor.perspectiveCorrectBitmapNormalized(source, topLeftX, topLeftY, topRightX, topRightY, bottomRightX, bottomRightY, bottomLeftX, bottomLeftY)
+    fun perspectiveCorrectBitmapFromCorners(source: Bitmap, corners: List<Offset>): Bitmap = ImageProcessor.perspectiveCorrectBitmapFromCorners(source, corners)
     fun applyFilter(original: Bitmap, type: FilterType): Bitmap = ImageProcessor.applyFilter(original, type)
     fun drawSignatureOnBitmap(pageBitmap: Bitmap, signatureBitmap: Bitmap, alignRight: Boolean = true): Bitmap = ImageProcessor.drawSignatureOnBitmap(pageBitmap, signatureBitmap, alignRight)
     fun drawWatermarkOnBitmap(source: Bitmap, text: String = "ScanMate AI Pro"): Bitmap = ImageProcessor.drawWatermarkOnBitmap(source, text)

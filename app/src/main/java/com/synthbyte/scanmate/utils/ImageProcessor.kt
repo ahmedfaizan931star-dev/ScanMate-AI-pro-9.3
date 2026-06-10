@@ -165,13 +165,32 @@ object ImageProcessor {
     }
 
     fun cropBitmapNormalized(source: Bitmap, leftPercent: Float, topPercent: Float, rightPercent: Float, bottomPercent: Float): Bitmap {
-        val left = (source.width * leftPercent.coerceIn(0f, 0.85f)).roundToInt()
-        val top = (source.height * topPercent.coerceIn(0f, 0.85f)).roundToInt()
-        val rightMargin = (source.width * rightPercent.coerceIn(0f, 0.85f)).roundToInt()
-        val bottomMargin = (source.height * bottomPercent.coerceIn(0f, 0.85f)).roundToInt()
-        val width = (source.width - left - rightMargin).coerceAtLeast(64)
-        val height = (source.height - top - bottomMargin).coerceAtLeast(64)
-        return Bitmap.createBitmap(source, left.coerceAtMost(source.width - 1), top.coerceAtMost(source.height - 1), min(width, source.width - left), min(height, source.height - top))
+        if (source.width <= 1 || source.height <= 1) return source.copy(Bitmap.Config.ARGB_8888, false)
+
+        val minWidthPx = min(96, source.width).coerceAtLeast(1)
+        val minHeightPx = min(96, source.height).coerceAtLeast(1)
+        var left = (source.width * leftPercent.coerceIn(0f, 0.95f)).roundToInt()
+        var top = (source.height * topPercent.coerceIn(0f, 0.95f)).roundToInt()
+        var right = (source.width * (1f - rightPercent.coerceIn(0f, 0.95f))).roundToInt()
+        var bottom = (source.height * (1f - bottomPercent.coerceIn(0f, 0.95f))).roundToInt()
+
+        left = left.coerceIn(0, source.width - 1)
+        top = top.coerceIn(0, source.height - 1)
+        right = right.coerceIn(left + 1, source.width)
+        bottom = bottom.coerceIn(top + 1, source.height)
+
+        if (right - left < minWidthPx) {
+            val center = ((left + right) / 2f).roundToInt()
+            left = (center - minWidthPx / 2).coerceIn(0, source.width - minWidthPx)
+            right = (left + minWidthPx).coerceAtMost(source.width)
+        }
+        if (bottom - top < minHeightPx) {
+            val center = ((top + bottom) / 2f).roundToInt()
+            top = (center - minHeightPx / 2).coerceIn(0, source.height - minHeightPx)
+            bottom = (top + minHeightPx).coerceAtMost(source.height)
+        }
+
+        return Bitmap.createBitmap(source, left, top, (right - left).coerceAtLeast(1), (bottom - top).coerceAtLeast(1))
     }
 
     fun autoCropDocument(source: Bitmap): Bitmap {
@@ -204,14 +223,22 @@ object ImageProcessor {
         bottomLeftY: Float
     ): Bitmap {
         if (source.width < 80 || source.height < 80) return source.copy(Bitmap.Config.ARGB_8888, false)
+        val corners = listOf(
+            Offset(topLeftX.coerceIn(0f, 0.45f), topLeftY.coerceIn(0f, 0.45f)),
+            Offset(1f - topRightX.coerceIn(0f, 0.45f), topRightY.coerceIn(0f, 0.45f)),
+            Offset(1f - bottomRightX.coerceIn(0f, 0.45f), 1f - bottomRightY.coerceIn(0f, 0.45f)),
+            Offset(bottomLeftX.coerceIn(0f, 0.45f), 1f - bottomLeftY.coerceIn(0f, 0.45f))
+        )
+        return perspectiveCorrectBitmapFromCorners(source, corners)
+    }
+
+    fun perspectiveCorrectBitmapFromCorners(source: Bitmap, corners: List<Offset>): Bitmap {
+        if (source.width < 80 || source.height < 80 || corners.size != 4) return source.copy(Bitmap.Config.ARGB_8888, false)
         val w = source.width.toFloat()
         val h = source.height.toFloat()
-        val points = listOf(
-            Offset(topLeftX.coerceIn(0f, 0.45f) * w, topLeftY.coerceIn(0f, 0.45f) * h),
-            Offset(w - topRightX.coerceIn(0f, 0.45f) * w, topRightY.coerceIn(0f, 0.45f) * h),
-            Offset(w - bottomRightX.coerceIn(0f, 0.45f) * w, h - bottomRightY.coerceIn(0f, 0.45f) * h),
-            Offset(bottomLeftX.coerceIn(0f, 0.45f) * w, h - bottomLeftY.coerceIn(0f, 0.45f) * h)
-        )
+        val points = corners.map { point ->
+            Offset(point.x.coerceIn(0f, 1f) * w, point.y.coerceIn(0f, 1f) * h)
+        }
         val ordered = orderDocumentCorners(points, source.width, source.height)
         if (!isValidDocumentPolygon(ordered, source.width, source.height)) return source.copy(Bitmap.Config.ARGB_8888, false)
         val warped = perspectiveWarp(source, ordered)
