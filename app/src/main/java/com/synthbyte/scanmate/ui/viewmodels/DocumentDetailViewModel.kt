@@ -276,8 +276,15 @@ class DocumentDetailViewModel @Inject constructor(
     }
 
     fun updatePageImage(pageId: Long, imagePath: String) = viewModelScope.launch(Dispatchers.IO) {
-        runCatching { dao.updatePageImage(pageId, imagePath) }
-            .onFailure { throwable -> publishError(throwable) }
+        runCatching {
+            val file = File(imagePath)
+            if (!file.exists() || file.length() == 0L) {
+                publishErrorMessage("Page image file is missing")
+                return@runCatching
+            }
+            dao.updatePageImage(pageId, imagePath)
+            dao.touchDocumentForPage(pageId)
+        }.onFailure { throwable -> publishError(throwable) }
     }
 
     fun deletePage(pageId: Long, onDone: () -> Unit = {}) = viewModelScope.launch(Dispatchers.IO) {
@@ -303,14 +310,26 @@ class DocumentDetailViewModel @Inject constructor(
 
     fun reorderPage(pageId: Long, newOrder: Int) = viewModelScope.launch(Dispatchers.IO) {
         runCatching {
-            dao.updatePageOrder(pageId, newOrder)
-            renumberPages()
+            val currentPages = dao.getPagesForDocumentOnce(docId).sortedBy { it.pageOrder }.toMutableList()
+            val index = currentPages.indexOfFirst { it.id == pageId }
+            if (index < 0) return@runCatching
+            val page = currentPages.removeAt(index)
+            currentPages.add(newOrder.coerceIn(0, currentPages.size), page)
+            currentPages.forEachIndexed { order, existing -> dao.updatePageOrder(existing.id, order) }
+            dao.touchDocument(docId)
         }.onFailure { throwable -> publishError(throwable) }
     }
 
     fun reorderPages(pages: List<Page>, onDone: () -> Unit = {}) = viewModelScope.launch(Dispatchers.IO) {
         runCatching {
-            pages.forEachIndexed { order, page -> dao.updatePageOrder(page.id, order) }
+            val knownIds = dao.getPagesForDocumentOnce(docId).map { it.id }.toSet()
+            val safePages = pages.filter { it.id in knownIds }.distinctBy { it.id }
+            if (safePages.size != knownIds.size) {
+                publishErrorMessage("Page order could not be saved safely")
+                return@runCatching
+            }
+            safePages.forEachIndexed { order, page -> dao.updatePageOrder(page.id, order) }
+            dao.touchDocument(docId)
             withContext(Dispatchers.Main) { onDone() }
         }.onFailure { throwable -> publishError(throwable) }
     }
@@ -318,6 +337,7 @@ class DocumentDetailViewModel @Inject constructor(
     private suspend fun deletePageInternal(pageId: Long) {
         dao.deletePageById(pageId)
         renumberPages()
+        dao.touchDocument(docId)
     }
 
     private suspend fun duplicatePageInternal(page: Page) {
@@ -330,6 +350,7 @@ class DocumentDetailViewModel @Inject constructor(
         }
         dao.insertPage(Page(documentId = docId, imagePath = copied.absolutePath, pageOrder = insertIndex))
         renumberPages()
+        dao.touchDocument(docId)
     }
 
     private suspend fun movePageInternal(page: Page, direction: Int) {
@@ -341,6 +362,7 @@ class DocumentDetailViewModel @Inject constructor(
         val current = pages.removeAt(index)
         pages.add(newIndex, current)
         pages.forEachIndexed { order, existing -> dao.updatePageOrder(existing.id, order) }
+        dao.touchDocument(docId)
     }
 
     private suspend fun renumberPages() {

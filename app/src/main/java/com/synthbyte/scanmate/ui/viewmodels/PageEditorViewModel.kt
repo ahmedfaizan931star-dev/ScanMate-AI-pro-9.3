@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 import javax.inject.Inject
 
 @HiltViewModel
@@ -62,10 +63,22 @@ class PageEditorViewModel @Inject constructor(
     }
 
     fun loadPageBitmap(path: String) = viewModelScope.launch(Dispatchers.IO) {
-        runCatching {
-            val bmp = ImageProcessor.decodeSampledBitmap(path, 2600, 2600)
-            _workingBitmap.value = bmp
-        }.onFailure { throwable -> publishError(throwable, "Failed to load page image") }
+        _isProcessing.value = true
+        try {
+            runCatching {
+                val file = File(path)
+                if (!file.exists() || file.length() == 0L) {
+                    _workingBitmap.value = null
+                    _errorState.value = "Page image file is missing"
+                    return@runCatching
+                }
+                val bmp = ImageProcessor.decodeSampledBitmap(path, 2600, 2600)
+                _workingBitmap.value = bmp
+                if (bmp == null) _errorState.value = "Page image could not be decoded"
+            }.onFailure { throwable -> publishError(throwable, "Failed to load page image") }
+        } finally {
+            _isProcessing.value = false
+        }
     }
 
     fun applyFilter(filterId: String) = viewModelScope.launch(Dispatchers.IO) {
@@ -116,7 +129,10 @@ class PageEditorViewModel @Inject constructor(
     suspend fun saveEditedPage(pageId: Long, bitmap: Bitmap): java.io.File? = withContext(Dispatchers.IO) {
         runCatching {
             val file = FileUtils.saveEditedBitmap(context, bitmap, "PAGE_${pageId}")
-            if (file != null) dao.updatePageImage(pageId, file.absolutePath)
+            if (file != null && file.exists() && file.length() > 0L) {
+                dao.updatePageImage(pageId, file.absolutePath)
+                dao.touchDocumentForPage(pageId)
+            }
             file
         }.onFailure { throwable -> publishError(throwable) }
             .getOrNull()
@@ -125,7 +141,10 @@ class PageEditorViewModel @Inject constructor(
     suspend fun replacePageImage(pageId: Long, uri: Uri): java.io.File? = withContext(Dispatchers.IO) {
         runCatching {
             val file = FileUtils.copyUriToImageFile(context, uri)
-            if (file != null) dao.updatePageImage(pageId, file.absolutePath)
+            if (file != null && file.exists() && file.length() > 0L) {
+                dao.updatePageImage(pageId, file.absolutePath)
+                dao.touchDocumentForPage(pageId)
+            }
             file
         }.onFailure { throwable -> publishError(throwable) }
             .getOrNull()
@@ -135,6 +154,7 @@ class PageEditorViewModel @Inject constructor(
         runCatching {
             dao.deletePageById(pageId)
             renumberPagesInternal()
+            dao.touchDocument(docId)
             withContext(Dispatchers.Main) { onDone() }
         }.onFailure { throwable -> publishError(throwable) }
     }
@@ -150,6 +170,7 @@ class PageEditorViewModel @Inject constructor(
             }
             dao.insertPage(Page(documentId = docId, imagePath = copied.absolutePath, pageOrder = insertIndex))
             renumberPagesInternal()
+            dao.touchDocument(docId)
         }.onFailure { throwable -> publishError(throwable) }
     }
 
@@ -163,12 +184,15 @@ class PageEditorViewModel @Inject constructor(
             val current = pages.removeAt(index)
             pages.add(newIndex, current)
             pages.forEachIndexed { order, existing -> dao.updatePageOrder(existing.id, order) }
+            dao.touchDocument(docId)
         }.onFailure { throwable -> publishError(throwable) }
     }
 
     suspend fun savePageOcr(page: Page, text: String) = withContext(Dispatchers.IO) {
-        runCatching { dao.updateOcrText(docId, "Page ${page.pageOrder + 1}:\n$text") }
-            .onFailure { throwable -> publishError(throwable) }
+        runCatching {
+            dao.updateOcrText(docId, "Page ${page.pageOrder + 1}:\n$text")
+            dao.touchDocument(docId)
+        }.onFailure { throwable -> publishError(throwable) }
     }
 
     private suspend fun renumberPagesInternal() {
