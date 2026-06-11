@@ -1,5 +1,6 @@
 package com.synthbyte.scanmate.ui.screens
 
+import com.synthbyte.scanmate.utils.SafeLogger
 import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager

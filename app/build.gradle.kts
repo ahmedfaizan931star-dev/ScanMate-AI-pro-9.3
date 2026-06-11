@@ -213,6 +213,7 @@ tasks.register<JacocoReport>("jacocoTestReport") {
 
 
 dependencies {
+    implementation("androidx.work:work-runtime-ktx:2.10.1")
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.accompanist.permissions)
     implementation(libs.androidx.activity.compose)
