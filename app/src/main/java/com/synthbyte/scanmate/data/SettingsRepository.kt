@@ -16,6 +16,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import com.synthbyte.scanmate.domain.GeminiModels
+import dagger.hilt.android.qualifiers.ApplicationContext
+import javax.inject.Inject
+import javax.inject.Singleton
 
 val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
 
@@ -29,8 +32,9 @@ enum class ThemeMode(val storageValue: String, val label: String, val descriptio
     }
 }
 
+@Singleton
 @Suppress("DEPRECATION")
-class SettingsRepository(private val context: Context) {
+class SettingsRepository @Inject constructor(@ApplicationContext private val context: Context) {
 
     private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 

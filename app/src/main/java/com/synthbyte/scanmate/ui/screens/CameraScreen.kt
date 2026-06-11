@@ -6,7 +6,6 @@ import android.media.AudioManager
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -84,7 +83,9 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -95,6 +96,7 @@ import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.synthbyte.scanmate.core.SafeLogger
 import com.synthbyte.scanmate.data.SettingsRepository
 import com.synthbyte.scanmate.ui.components.DocumentOverlay
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -139,6 +141,7 @@ fun CameraScreen(
     }
 
     val context = LocalContext.current
+    val haptics = LocalHapticFeedback.current
     val viewModel: CameraViewModel = hiltViewModel()
     val defaultWorkspace by settingsRepository.defaultWorkspaceFlow.collectAsState(initial = "Inbox")
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -181,6 +184,17 @@ fun CameraScreen(
         else -> "Move closer or improve lighting"
     }
 
+    LaunchedEffect(autoDetectEnabled) {
+        EdgeAnalyzer.reset()
+        stableFrameCount = 0
+        if (!autoDetectEnabled) {
+            detectedCorners = null
+            currentConfidence = 0f
+        } else {
+            analysisFrameCount = 0
+        }
+    }
+
     fun finishDocument() {
         if (capturedImages.isEmpty()) {
             Toast.makeText(context, "No pages captured", Toast.LENGTH_SHORT).show()
@@ -193,7 +207,7 @@ fun CameraScreen(
                 val documentId = viewModel.saveScannedDocument(capturedImages.toList(), defaultWorkspace)
                 onScanFinished(documentId)
             } catch (throwable: Throwable) {
-                Log.e("CameraScreen", "Saving scanned document failed", throwable)
+                SafeLogger.e("CameraScreen", "Saving scanned document failed", throwable)
                 Toast.makeText(context, "Save failed: ${throwable.localizedMessage ?: "Unknown error"}", Toast.LENGTH_LONG).show()
                 isFinishing = false
             }
@@ -266,6 +280,7 @@ fun CameraScreen(
                             managedFile
                         }
                         capturedImages.add(finalFile)
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                         isSaving = false
                         Toast.makeText(context, "Captured", Toast.LENGTH_SHORT).show()
                     }
@@ -370,25 +385,26 @@ fun CameraScreen(
                                         detectedCorners = result.corners
                                         currentConfidence = result.confidence
                                         val nowMain = System.currentTimeMillis()
-                                        val autoCaptureReady = result.confidence >= 0.80f &&
+                                        val autoCaptureReady = result.isStable &&
+                                            result.confidence >= 0.78f &&
                                             autoDetectEnabled &&
                                             !isSaving &&
                                             !isFinishing &&
-                                            nowMain - lastAutoCaptureAt > 2200L
+                                            nowMain - lastAutoCaptureAt > 2600L
                                         if (autoCaptureReady) {
                                             stableFrameCount += 1
-                                            if (stableFrameCount >= 6) {
+                                            if (stableFrameCount >= 2) {
                                                 stableFrameCount = 0
                                                 lastAutoCaptureAt = nowMain
                                                 takePicture()
                                             }
-                                        } else if (result.confidence < 0.58f || isSaving || isFinishing) {
+                                        } else if (!result.isStable || result.confidence < 0.62f || isSaving || isFinishing) {
                                             stableFrameCount = 0
                                         }
                                     }
                                 }
                             } catch (throwable: Throwable) {
-                                Log.e("CameraScreen", "Edge analysis failed", throwable)
+                                SafeLogger.e("CameraScreen", "Edge analysis failed", throwable)
                             } finally {
                                 imageProxy.close()
                             }
@@ -403,7 +419,7 @@ fun CameraScreen(
                 torchEnabled = false
             }
         }.onFailure { throwable ->
-            Log.e("CameraScreen", "Camera bind failed", throwable)
+            SafeLogger.e("CameraScreen", "Camera bind failed", throwable)
             cameraError = throwable.localizedMessage ?: "Camera failed to start."
         }
     }
@@ -539,7 +555,15 @@ fun CameraScreen(
                         Icon(Icons.Default.PhotoLibrary, contentDescription = "Gallery", tint = Color.White)
                     }
                     AssistChip(
-                        onClick = { autoDetectEnabled = !autoDetectEnabled },
+                        onClick = {
+                            autoDetectEnabled = !autoDetectEnabled
+                            EdgeAnalyzer.reset()
+                            stableFrameCount = 0
+                            if (autoDetectEnabled) {
+                                detectedCorners = null
+                                currentConfidence = 0f
+                            }
+                        },
                         label = { Text(if (autoDetectEnabled) "Auto edges" else "Manual") },
                         shape = RoundedCornerShape(50),
                         colors = AssistChipDefaults.assistChipColors(

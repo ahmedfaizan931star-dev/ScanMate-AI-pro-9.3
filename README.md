@@ -1,52 +1,97 @@
 # ScanMate AI Pro
 
-**Package:** `com.synthbyte.scanmate`
+ScanMate AI Pro is a premium offline-first Android document scanner built with Kotlin, Jetpack Compose, Material 3, CameraX, Room, ML Kit OCR/barcode scanning, encrypted vault storage, widgets, and export tools.
 
-ScanMate AI Pro is an offline-first Android document scanner with CameraX scanning, English OCR, PDF/TXT/DOCX/ZIP export, QR tools, encrypted vault, widgets, launcher shortcuts, onboarding, and optional user-key AI workflows.
+## Features
 
-## Build outputs
+- Multi-page document scanning with CameraX
+- Real-time scanner guide and edge overlay with animated brackets
+- Manual capture, auto-edge capture, flash toggle, gallery import, and batch scan sessions
+- Page editor with crop, perspective correction, rotate, filters, watermark, signature, duplicate, delete, and reorder actions
+- English OCR with post-processing, reading-order cleanup, and searchable text storage
+- PDF export with A4/Letter/Auto sizing, compression options, searchable text layer support, and password protection
+- DOCX and TXT export for OCR text
+- ZIP backup with `manifest.json` containing file metadata
+- QR scanner and QR generator for text, URL, Wi-Fi, contact, email, SMS, and phone payloads
+- Encrypted local vault with Android BiometricPrompt and AES-256-GCM Android Keystore storage
+- Home screen widgets for quick scan, recent document, and AI action
+- Optional user-key Gemini AI workspace; core scanner features work fully offline
+- Material 3 UI with light/dark/dynamic color support
+- Settings security audit for biometric, vault, encryption, and last unlock status
 
-GitHub Actions is configured to produce:
+## Screenshots
 
-- Debug APK
-- Release APK
-- Release AAB
+Add final Play Store screenshots here before release:
 
-The app does not require cloud sync, login/auth, paid subscriptions, or hardcoded API keys.
+| Home | Scanner | Page Editor | Export | Vault |
+| --- | --- | --- | --- | --- |
+| `docs/screenshots/home.png` | `docs/screenshots/scanner.png` | `docs/screenshots/editor.png` | `docs/screenshots/export.png` | `docs/screenshots/vault.png` |
 
+## Tech Stack
 
-## Signing Setup (GitHub Actions)
+- Kotlin + Jetpack Compose
+- Material 3 / Material You dynamic color
+- Hilt dependency injection
+- Room with migrations
+- DataStore Preferences for app settings
+- CameraX
+- ML Kit Text Recognition and Barcode Scanning
+- WorkManager foundation for background OCR jobs
+- FileProvider for safe sharing
+- Android Keystore AES-256-GCM vault encryption
+- GitHub Actions CI/CD
 
-GitHub Actions is configured for **mandatory signed release builds**.
-
-It builds Debug APK first, then requires release signing secrets for Release APK/AAB. If a secret is missing, the workflow fails early with a clear error instead of uploading an unsigned release by mistake.
-
-Add these secrets in GitHub repo → Settings → Secrets and variables → Actions:
-
-| Secret | Value |
-|--------|-------|
-| SIGNING_KEY | Base64 encoded `.jks` keystore file |
-| KEY_STORE_PASSWORD | Keystore password. `STORE_PASSWORD` is also supported as a legacy fallback. |
-| KEY_ALIAS | Key alias, for example `scanmate-key` |
-| KEY_PASSWORD | Key password |
-
-Generate keystore locally:
+## Build Instructions
 
 ```bash
-keytool -genkey -v \
-  -keystore scanmate-release.jks \
-  -alias scanmate-key \
-  -keyalg RSA \
-  -keysize 2048 \
-  -validity 10000
+chmod +x ./gradlew
+./gradlew clean :app:lintDebug :app:testDebugUnitTest :app:assembleDebug
 ```
 
-Encode your keystore for GitHub Actions:
+Release build requires signing secrets or a local `keystore.properties` file:
+
+```properties
+storeFile=keystore/scanmate-release.jks
+storePassword=YOUR_STORE_PASSWORD
+keyAlias=scanmate-key
+keyPassword=YOUR_KEY_PASSWORD
+```
+
+Then run:
 
 ```bash
-base64 -w 0 scanmate-release.jks
+./gradlew :app:assembleRelease :app:bundleRelease
 ```
 
-For local signed release builds, copy `keystore.properties.example` to `keystore.properties`, fill in real values, and place local keystores under `app/keystore/` or provide the path through `KEYSTORE_PATH`. Never commit real keystore files or real passwords.
+## GitHub Actions Signing Setup
 
-For strict local validation matching CI, run with `SCANMATE_REQUIRE_RELEASE_SIGNING=true`.
+Add these repository secrets:
+
+- `SIGNING_KEY`: base64 encoded `.jks`
+- `KEY_STORE_PASSWORD`
+- `KEY_ALIAS`
+- `KEY_PASSWORD`
+
+The workflow runs lint, unit tests, emulator tests, debug build, signed release APK/AAB build, signature verification, and artifact upload.
+
+## Privacy
+
+ScanMate AI Pro is offline-first. Scans, OCR text, exports, QR history, and vault files remain on the device unless the user explicitly shares or exports them. Optional Gemini AI calls only run when the user adds their own API key and triggers an AI action.
+
+Privacy policy: <https://ahmedfaizan931star-dev.github.io/scanmate-ai-pro-site/privacy.html>
+
+## Repository Topics
+
+`android`, `kotlin`, `document-scanner`, `ocr`, `material-design`, `jetpack`, `offline-first`
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Code of Conduct
+
+See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+
+## Licence
+
+Add your chosen licence before publishing the source publicly. If you do not want external reuse, keep the repository private or add an “All rights reserved” notice.

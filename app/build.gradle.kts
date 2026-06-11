@@ -1,5 +1,5 @@
-import java.util.Locale
 import java.util.Properties
+import org.gradle.testing.jacoco.tasks.JacocoReport
 
 plugins {
     alias(libs.plugins.android.application)
@@ -8,12 +8,14 @@ plugins {
     alias(libs.plugins.google.devtools.ksp)
     alias(libs.plugins.kotlin.kapt)
     alias(libs.plugins.hilt)
+    id("jacoco")
+    alias(libs.plugins.ktlint)
 }
 
 val compileSdkOverride = providers.gradleProperty("SCANMATE_COMPILE_SDK").orElse("35").get().toInt()
 val targetSdkOverride = providers.gradleProperty("SCANMATE_TARGET_SDK").orElse("35").get().toInt()
-val versionCodeOverride = (System.getenv("VERSION_CODE") ?: providers.gradleProperty("VERSION_CODE").orElse("5").get()).toInt()
-val versionNameOverride = System.getenv("VERSION_NAME") ?: providers.gradleProperty("VERSION_NAME").orElse("1.5.0").get()
+val versionCodeOverride = (System.getenv("VERSION_CODE") ?: providers.gradleProperty("VERSION_CODE").orElse("6").get()).toInt()
+val versionNameOverride = System.getenv("VERSION_NAME") ?: providers.gradleProperty("VERSION_NAME").orElse("1.6.0").get()
 
 val signingProperties = Properties().apply {
     val signingFile = rootProject.file("keystore.properties")
@@ -81,6 +83,7 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
+        buildConfigField("String", "GEMINI_CERT_PINS", "\"\"")
     }
 
     signingConfigs {
@@ -153,12 +156,61 @@ android {
         }
     }
 
+    lint {
+        abortOnError = true
+        checkReleaseBuilds = true
+        warningsAsErrors = false
+        disable += setOf("GradleDependency")
+    }
+
     testOptions {
         unitTests {
             isIncludeAndroidResources = true
+            all { test ->
+                test.useJUnitPlatform()
+                test.testLogging {
+                    events("passed", "skipped", "failed")
+                }
+            }
         }
     }
 }
+
+jacoco {
+    toolVersion = libs.versions.jacoco.get()
+}
+
+ktlint {
+    android.set(true)
+    ignoreFailures.set(false)
+    filter {
+        exclude { entry -> entry.file.path.contains("/build/") }
+    }
+}
+
+tasks.register<JacocoReport>("jacocoTestReport") {
+    dependsOn("testDebugUnitTest")
+    reports {
+        xml.required.set(true)
+        html.required.set(true)
+        csv.required.set(false)
+    }
+    val fileFilter = listOf(
+        "**/R.class",
+        "**/R$*.class",
+        "**/BuildConfig.*",
+        "**/Manifest*.*",
+        "**/*Test*.*",
+        "android/**/*.*"
+    )
+    val debugTree = fileTree(layout.buildDirectory.dir("tmp/kotlin-classes/debug").get().asFile) {
+        exclude(fileFilter)
+    }
+    classDirectories.setFrom(debugTree)
+    sourceDirectories.setFrom(files("src/main/java"))
+    executionData.setFrom(fileTree(layout.buildDirectory.get().asFile) { include("outputs/unit_test_code_coverage/debugUnitTest/testDebugUnitTest.exec") })
+}
+
 
 dependencies {
     implementation(platform(libs.androidx.compose.bom))
@@ -194,6 +246,10 @@ dependencies {
     implementation(libs.hilt.android)
     implementation(libs.androidx.biometric)
     implementation(libs.androidx.security.crypto)
+    implementation(libs.androidx.profileinstaller)
+    implementation(libs.androidx.core.splashscreen)
+    implementation(libs.androidx.startup.runtime)
+    implementation(libs.androidx.work.runtime.ktx)
 
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
 
@@ -212,6 +268,11 @@ dependencies {
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.hilt.android.testing)
     testImplementation(libs.robolectric)
+    testRuntimeOnly(libs.junit.vintage.engine)
+    testRuntimeOnly(libs.junit.jupiter.engine)
+    testImplementation(libs.junit.jupiter.api)
+    testImplementation(libs.turbine)
+    testImplementation(libs.mockk)
 
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
@@ -224,6 +285,7 @@ dependencies {
     debugImplementation(libs.logging.interceptor)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
+    debugImplementation(libs.leakcanary.android)
 
     ksp(libs.androidx.room.compiler)
     ksp(libs.moshi.kotlin.codegen)

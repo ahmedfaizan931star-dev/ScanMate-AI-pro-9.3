@@ -13,12 +13,15 @@ import com.google.zxing.qrcode.QRCodeWriter
 import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.util.EnumMap
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
+import com.synthbyte.scanmate.core.SafeLogger
 
 object QRUtils {
     fun generateQRCode(
@@ -44,7 +47,7 @@ object QRUtils {
             }
             if (addCenterBadge) addSafeCenterBadge(bitmap, backgroundColor, foregroundColor) else bitmap
         } catch (e: Exception) {
-            e.printStackTrace()
+            SafeLogger.e("MediaUtils", "Operation failed", e)
             null
         }
     }
@@ -83,6 +86,7 @@ object ZipUtils {
             if (files.isEmpty()) return@withContext null
 
             val usedEntryNames = mutableSetOf<String>()
+            val manifest = JSONArray()
             ZipOutputStream(FileOutputStream(zipFile).buffered()).use { zos ->
                 files.forEach { file ->
                     val parent = file.parentFile?.name
@@ -96,6 +100,15 @@ object ZipUtils {
                         entryName = "$parent/${file.nameWithoutExtension}_$counter.${file.extension}".replace("..", ".")
                         counter += 1
                     }
+                    manifest.put(
+                        JSONObject()
+                            .put("path", entryName)
+                            .put("name", file.name)
+                            .put("type", FileUtils.mimeTypeFor(file))
+                            .put("sizeBytes", file.length())
+                            .put("createdOrModifiedAt", file.lastModified())
+                            .put("ocrConfidence", JSONObject.NULL)
+                    )
                     FileInputStream(file).buffered().use { fis ->
                         val entry = ZipEntry(entryName)
                         zos.putNextEntry(entry)
@@ -103,10 +116,21 @@ object ZipUtils {
                         zos.closeEntry()
                     }
                 }
+                zos.putNextEntry(ZipEntry("manifest.json"))
+                zos.write(
+                    JSONObject()
+                        .put("app", "ScanMate AI Pro")
+                        .put("schemaVersion", 1)
+                        .put("generatedAt", System.currentTimeMillis())
+                        .put("files", manifest)
+                        .toString(2)
+                        .toByteArray(Charsets.UTF_8)
+                )
+                zos.closeEntry()
             }
             zipFile.takeIf { it.exists() && it.length() > 0L }
         } catch (e: Exception) {
-            e.printStackTrace()
+            SafeLogger.e("MediaUtils", "Operation failed", e)
             null
         }
     }

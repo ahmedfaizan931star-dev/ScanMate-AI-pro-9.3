@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Policy
 import androidx.compose.material.icons.filled.PrivacyTip
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -65,6 +66,8 @@ import com.synthbyte.scanmate.data.SettingsRepository
 import com.synthbyte.scanmate.data.ThemeMode
 import com.synthbyte.scanmate.domain.GeminiHelper
 import com.synthbyte.scanmate.domain.GeminiModels
+import com.synthbyte.scanmate.security.SecurityAudit
+import com.synthbyte.scanmate.ui.components.SecureScreenEffect
 import com.synthbyte.scanmate.utils.NetworkUtils
 import kotlinx.coroutines.launch
 
@@ -73,6 +76,7 @@ private const val PRIVACY_URL = "https://ahmedfaizan931star-dev.github.io/scanma
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(onNavigateBack: () -> Unit, settingsRepository: SettingsRepository) {
+    SecureScreenEffect()
     val context = LocalContext.current
     val uriHandler = LocalUriHandler.current
     val repository = settingsRepository
@@ -92,6 +96,7 @@ fun SettingsScreen(onNavigateBack: () -> Unit, settingsRepository: SettingsRepos
     var testMessage by remember { mutableStateOf("") }
     var testIsError by remember { mutableStateOf(false) }
     var crashLogPreview by remember { mutableStateOf(readCrashLogPreview(context)) }
+    var securitySnapshot by remember { mutableStateOf(SecurityAudit.snapshot(context)) }
 
     LaunchedEffect(apiKey) { currentKeyInput = apiKey.orEmpty() }
     LaunchedEffect(defaultWorkspace) { defaultWorkspaceInput = defaultWorkspace }
@@ -127,6 +132,7 @@ fun SettingsScreen(onNavigateBack: () -> Unit, settingsRepository: SettingsRepos
                 }
             }
             StatusCard(isOnline = isOnline)
+            SecurityAuditCard(snapshot = securitySnapshot, onRefresh = { securitySnapshot = SecurityAudit.snapshot(context) })
 
             Card(
                 shape = RoundedCornerShape(22.dp),
@@ -379,6 +385,34 @@ fun SettingsScreen(onNavigateBack: () -> Unit, settingsRepository: SettingsRepos
                 },
                 modifier = Modifier.fillMaxWidth()
             ) { Text("Open Gemini API docs") }
+        }
+    }
+}
+
+@Composable
+private fun SecurityAuditCard(snapshot: SecurityAudit.Snapshot, onRefresh: () -> Unit) {
+    Card(
+        shape = RoundedCornerShape(22.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Security, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                Text(
+                    "Security audit",
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(start = 12.dp)
+                )
+            }
+            Text("Biometric: ${snapshot.biometricStatus}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Encryption: ${snapshot.encryptionStatus}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Keystore: ${snapshot.strongBoxStatus}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Vault: ${snapshot.vaultItemCount} encrypted item(s)", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Last vault access: ${snapshot.lastVaultAccess}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            OutlinedButton(onClick = onRefresh) { Text("Refresh security status") }
         }
     }
 }

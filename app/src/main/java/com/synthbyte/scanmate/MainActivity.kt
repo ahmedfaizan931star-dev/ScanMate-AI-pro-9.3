@@ -3,8 +3,8 @@ package com.synthbyte.scanmate
 import android.content.Intent
 import android.os.Bundle
 import android.os.Process
-import android.util.Log
 import androidx.fragment.app.FragmentActivity
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Box
@@ -30,6 +30,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.synthbyte.scanmate.core.SafeLogger
 import com.synthbyte.scanmate.data.SettingsRepository
 import com.synthbyte.scanmate.data.ThemeMode
 import com.synthbyte.scanmate.ui.components.GlobalErrorBoundary
@@ -54,19 +55,21 @@ import com.synthbyte.scanmate.ui.screens.VaultScreen
 import com.synthbyte.scanmate.ui.theme.ScanMateTheme
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
+import javax.inject.Inject
 
 @AndroidEntryPoint
 class MainActivity : FragmentActivity() {
     private var shortcutRouteState: MutableState<String>? = null
-    private lateinit var settingsRepository: SettingsRepository
+    @Inject
+    lateinit var settingsRepository: SettingsRepository
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        installSplashScreen()
         super.onCreate(savedInstanceState)
-        settingsRepository = SettingsRepository(applicationContext)
         val previousCrashHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
             writeCrashLog(throwable)
-            Log.e("ScanMate", "Uncaught app crash", throwable)
+            SafeLogger.e("ScanMate", "Uncaught app crash", throwable)
             if (previousCrashHandler != null && previousCrashHandler !== Thread.getDefaultUncaughtExceptionHandler()) {
                 previousCrashHandler.uncaughtException(thread, throwable)
             } else {
@@ -265,7 +268,7 @@ class MainActivity : FragmentActivity() {
             }
             logFile.appendText(entry)
             if (logFile.length() > 256_000L) {
-                Thread { runCatching { logFile.writeText(logFile.readText().takeLast(128_000)) } }.start()
+                runCatching { logFile.writeText(logFile.readText().takeLast(128_000)) }
             }
         }
     }

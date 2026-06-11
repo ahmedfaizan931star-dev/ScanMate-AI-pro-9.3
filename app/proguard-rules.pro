@@ -139,3 +139,10 @@
 
 # Logging optional integrations.
 -dontwarn org.apache.logging.log4j.**
+
+# ============================================================
+# WorkManager / workers / security audit
+# ============================================================
+-keep class com.synthbyte.scanmate.workers.** { *; }
+-keep class androidx.work.** { *; }
+-dontwarn androidx.work.**

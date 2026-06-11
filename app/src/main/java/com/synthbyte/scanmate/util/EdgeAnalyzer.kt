@@ -8,34 +8,36 @@ import kotlin.math.min
 import kotlin.math.sqrt
 
 /**
- * ScanMate document edge analyzer v2.
+ * ScanMate document edge analyzer v3.
  *
- * Legal/safety note:
- * - Original Kotlin implementation written for ScanMate.
- * - No copied GitHub scanner code.
- * - No OpenCV/native dependency required.
+ * This implementation intentionally remains pure Kotlin/YUV so release APK/AAB builds stay stable without
+ * OpenCV native binaries. It integrates the useful ideas from the mathematical scanner review:
+ * - Sobel-style gradient magnitude from the camera luminance plane.
+ * - Projection-based document region proposal for speed on low-end phones.
+ * - Corner refinement through edge-support scoring.
+ * - Line-support scoring for the four sides of the selected quadrilateral.
+ * - Multi-frame EMA/variance stability tracking so the overlay does not jump.
  *
- * Design goals:
- * - Keep the public API compatible with the existing CameraScreen integration.
- * - Prefer stable detections over jumpy aggressive detections.
- * - Handle normal paper, low-light paper, shadows, and high-contrast receipts.
- * - Fail safely so the manual crop/default scanner frame remains available.
+ * Public API is kept compatible with CameraScreen: detect(ImageProxy): Result?.
  */
 object EdgeAnalyzer {
 
-    data class Result(val corners: List<Offset>, val confidence: Float)
+    data class Result(val corners: List<Offset>, val confidence: Float, val isStable: Boolean = false)
 
     private const val SAMPLE_WIDTH = 352
     private const val SAMPLE_HEIGHT = 264
-    private const val MIN_CONFIDENCE = 0.31f
+    private const val MIN_CONFIDENCE = 0.34f
     private const val RETURN_PREVIOUS_CONFIDENCE = 0.27f
     private const val STRONG_LOCK_CONFIDENCE = 0.72f
-    private const val BASE_SMOOTHING_ALPHA = 0.38f
+    private const val HISTORY_SIZE = 5
+    private const val STABILITY_THRESHOLD = 0.035f
+    private const val BASE_SMOOTHING_ALPHA = 0.36f
 
     private var smoothedCorners: List<Offset>? = null
     private var smoothedConfidence = 0f
     private var missedFrames = 0
     private var lastRotation = Int.MIN_VALUE
+    private val frameHistory = ArrayDeque<List<Offset>>()
 
     fun detect(image: ImageProxy): Result? {
         val rotation = ((image.imageInfo.rotationDegrees % 360) + 360) % 360
@@ -50,21 +52,25 @@ object EdgeAnalyzer {
             if (missedFrames >= 7) resetSmoothing()
             val previous = smoothedCorners ?: return null
             val decayed = (smoothedConfidence * 0.82f).coerceIn(0f, 1f)
-            return if (decayed >= RETURN_PREVIOUS_CONFIDENCE) Result(previous, decayed) else null
+            return if (decayed >= RETURN_PREVIOUS_CONFIDENCE) Result(previous, decayed, isStable = false) else null
         }
 
         missedFrames = 0
+        pushHistory(raw.corners)
+        val averaged = averageCorners(frameHistory.toList()) ?: raw.corners
+        val jitter = maxCornerJitter(frameHistory.toList(), averaged)
         val previous = smoothedCorners
-        val nextCorners = if (previous != null && previous.size == 4 && raw.corners.size == 4) {
+        val nextCorners = if (previous != null && previous.size == 4) {
             val maxJump = previous.zip(raw.corners).maxOf { (old, new) ->
                 max(abs(old.x - new.x), abs(old.y - new.y))
             }
+            val stabilityBoost = if (frameHistory.size == HISTORY_SIZE && jitter < STABILITY_THRESHOLD) -0.08f else 0f
             val alpha = when {
-                raw.confidence >= STRONG_LOCK_CONFIDENCE && maxJump < 0.08f -> 0.28f
+                raw.confidence >= STRONG_LOCK_CONFIDENCE && maxJump < 0.08f -> 0.28f + stabilityBoost
                 maxJump > 0.24f -> 0.76f
                 maxJump > 0.14f -> 0.58f
-                else -> BASE_SMOOTHING_ALPHA
-            }
+                else -> BASE_SMOOTHING_ALPHA + stabilityBoost
+            }.coerceIn(0.22f, 0.78f)
             previous.zip(raw.corners).map { (old, new) ->
                 Offset(
                     x = (old.x * (1f - alpha) + new.x * alpha).coerceIn(0f, 1f),
@@ -75,9 +81,19 @@ object EdgeAnalyzer {
             raw.corners
         }
 
+        val isStable = frameHistory.size == HISTORY_SIZE && jitter < STABILITY_THRESHOLD
+        val stabilityScore = if (frameHistory.size == HISTORY_SIZE) {
+            (1f - jitter / 0.09f).coerceIn(0f, 1f)
+        } else {
+            0.25f
+        }
         smoothedCorners = nextCorners
-        smoothedConfidence = (smoothedConfidence * 0.40f + raw.confidence * 0.60f).coerceIn(0f, 1f)
-        return Result(nextCorners, smoothedConfidence)
+        smoothedConfidence = (
+            smoothedConfidence * 0.35f +
+                raw.confidence * 0.55f +
+                stabilityScore * 0.10f
+            ).coerceIn(0f, 1f)
+        return Result(nextCorners, smoothedConfidence, isStable = isStable)
     }
 
     private fun detectRaw(image: ImageProxy, rotation: Int): Result? {
@@ -96,10 +112,10 @@ object EdgeAnalyzer {
         val contrast = (p95 - p05).coerceAtLeast(1)
         if (contrast < 10) return null
 
-        val edgeThreshold = max(18, (contrast * 0.18f).toInt()).coerceIn(18, 82)
+        val edgeThreshold = max(18, (contrast * 0.18f).toInt()).coerceIn(18, 84)
         val brightThreshold = max(p72, p55 + max(8, contrast / 9)).coerceIn(58, 242)
         val darkInkThreshold = min(p35, p12 + max(8, contrast / 10)).coerceIn(12, 210)
-        val likelyWhiteBackground = p88 > 178 && contrast < 82
+        val likelyWhiteBackground = p88 > 178 && contrast < 84
 
         val candidateMask = BooleanArray(width * height)
         val edgeMap = IntArray(width * height)
@@ -161,7 +177,7 @@ object EdgeAnalyzer {
         val top = (verticalRange.first - paddingY).coerceIn(0, height - 2)
         val bottom = (verticalRange.second + paddingY).coerceIn(top + 1, height - 1)
 
-        val quad = estimateQuadrilateral(
+        val proposedQuad = estimateQuadrilateral(
             mask = candidateMask,
             edgeMap = edgeMap,
             edgeThreshold = edgeThreshold,
@@ -178,7 +194,8 @@ object EdgeAnalyzer {
             Offset(left / width.toFloat(), bottom / height.toFloat())
         )
 
-        if (!isStableQuad(quad)) return null
+        val refinedQuad = refineCornersByEdgeSupport(proposedQuad, edgeMap, edgeThreshold, width, height)
+        if (!isStableQuad(refinedQuad)) return null
 
         val boxWidth = (right - left).toFloat() / width.toFloat()
         val boxHeight = (bottom - top).toFloat() / height.toFloat()
@@ -200,7 +217,8 @@ object EdgeAnalyzer {
         val centerScore = (1f - (abs(centerX - 0.5f) + abs(centerY - 0.5f)) / 0.72f).coerceIn(0f, 1f)
         val edgeScore = (edgeCount.toFloat() / totalPixels.toFloat() / 0.10f).coerceIn(0f, 1f)
         val fillScore = (innerBrightCount.toFloat() / totalPixels.toFloat() / boxArea.coerceAtLeast(0.06f)).coerceIn(0f, 1f)
-        val geometryScore = quadGeometryScore(quad)
+        val geometryScore = quadGeometryScore(refinedQuad)
+        val lineScore = sideEdgeSupportScore(refinedQuad, edgeMap, edgeThreshold, width, height)
         val borderPenalty = listOf(
             left / width.toFloat(),
             top / height.toFloat(),
@@ -209,17 +227,18 @@ object EdgeAnalyzer {
         ).minOrNull()?.let { if (it < 0.006f) 0.10f else 0f } ?: 0f
 
         val confidence = (
-            areaScore * 0.22f +
-                aspectScore * 0.14f +
-                centerScore * 0.12f +
-                edgeScore * 0.20f +
-                fillScore * 0.18f +
-                geometryScore * 0.14f -
+            areaScore * 0.20f +
+                aspectScore * 0.12f +
+                centerScore * 0.10f +
+                edgeScore * 0.18f +
+                fillScore * 0.16f +
+                geometryScore * 0.12f +
+                lineScore * 0.12f -
                 borderPenalty
             ).coerceIn(0f, 1f)
 
         if (confidence < MIN_CONFIDENCE) return null
-        return Result(quad.rotateNormalized(rotation), confidence)
+        return Result(refinedQuad.rotateNormalized(rotation), confidence)
     }
 
     private fun sampleLuma(image: ImageProxy, targetWidth: Int, targetHeight: Int): IntArray? {
@@ -349,19 +368,95 @@ object EdgeAnalyzer {
 
         if (topLefts.size < 3 || topRights.size < 3 || bottomLefts.size < 3 || bottomRights.size < 3) return null
 
-        val tlX = topLefts.robustMedian().coerceIn(0, width - 1)
-        val trX = topRights.robustMedian().coerceIn(0, width - 1)
-        val blX = bottomLefts.robustMedian().coerceIn(0, width - 1)
-        val brX = bottomRights.robustMedian().coerceIn(0, width - 1)
-
         val quad = listOf(
-            Offset(tlX / width.toFloat(), top / height.toFloat()),
-            Offset(trX / width.toFloat(), top / height.toFloat()),
-            Offset(brX / width.toFloat(), bottom / height.toFloat()),
-            Offset(blX / width.toFloat(), bottom / height.toFloat())
+            Offset(topLefts.robustMedian() / width.toFloat(), top / height.toFloat()),
+            Offset(topRights.robustMedian() / width.toFloat(), top / height.toFloat()),
+            Offset(bottomRights.robustMedian() / width.toFloat(), bottom / height.toFloat()),
+            Offset(bottomLefts.robustMedian() / width.toFloat(), bottom / height.toFloat())
         ).map { Offset(it.x.coerceIn(0f, 1f), it.y.coerceIn(0f, 1f)) }
 
         return quad.takeIf(::isStableQuad)
+    }
+
+    private fun refineCornersByEdgeSupport(
+        corners: List<Offset>,
+        edgeMap: IntArray,
+        edgeThreshold: Int,
+        width: Int,
+        height: Int
+    ): List<Offset> {
+        if (corners.size != 4) return corners
+        val searchRadius = 8
+        return corners.map { corner ->
+            val cx = (corner.x * width).toInt().coerceIn(1, width - 2)
+            val cy = (corner.y * height).toInt().coerceIn(1, height - 2)
+            var bestX = cx
+            var bestY = cy
+            var bestScore = Int.MIN_VALUE
+
+            for (y in cy - searchRadius..cy + searchRadius) {
+                if (y !in 1 until height - 1) continue
+                for (x in cx - searchRadius..cx + searchRadius) {
+                    if (x !in 1 until width - 1) continue
+                    val index = y * width + x
+                    val localScore = localEdgeEnergy(edgeMap, width, height, x, y, edgeThreshold)
+                    val distancePenalty = (abs(x - cx) + abs(y - cy)) * 2
+                    val score = localScore - distancePenalty
+                    if (score > bestScore) {
+                        bestScore = score
+                        bestX = x
+                        bestY = y
+                    }
+                }
+            }
+            Offset(bestX / width.toFloat(), bestY / height.toFloat())
+        }
+    }
+
+    private fun localEdgeEnergy(edgeMap: IntArray, width: Int, height: Int, centerX: Int, centerY: Int, threshold: Int): Int {
+        var score = 0
+        for (y in centerY - 2..centerY + 2) {
+            if (y !in 1 until height - 1) continue
+            for (x in centerX - 2..centerX + 2) {
+                if (x !in 1 until width - 1) continue
+                val value = edgeMap[y * width + x]
+                if (value >= threshold) score += value
+            }
+        }
+        return score
+    }
+
+    private fun sideEdgeSupportScore(corners: List<Offset>, edgeMap: IntArray, edgeThreshold: Int, width: Int, height: Int): Float {
+        if (corners.size != 4) return 0f
+        val scores = listOf(
+            edgeSupportAlongLine(corners[0], corners[1], edgeMap, edgeThreshold, width, height),
+            edgeSupportAlongLine(corners[1], corners[2], edgeMap, edgeThreshold, width, height),
+            edgeSupportAlongLine(corners[2], corners[3], edgeMap, edgeThreshold, width, height),
+            edgeSupportAlongLine(corners[3], corners[0], edgeMap, edgeThreshold, width, height)
+        )
+        return scores.average().toFloat().coerceIn(0f, 1f)
+    }
+
+    private fun edgeSupportAlongLine(a: Offset, b: Offset, edgeMap: IntArray, edgeThreshold: Int, width: Int, height: Int): Float {
+        val distance = distance(a, b)
+        val samples = (distance * max(width, height)).toInt().coerceIn(16, 96)
+        if (samples <= 0) return 0f
+        var hits = 0
+        for (i in 0..samples) {
+            val t = i / samples.toFloat()
+            val x = ((a.x + (b.x - a.x) * t) * width).toInt().coerceIn(1, width - 2)
+            val y = ((a.y + (b.y - a.y) * t) * height).toInt().coerceIn(1, height - 2)
+            var supported = false
+            for (yy in y - 1..y + 1) {
+                for (xx in x - 1..x + 1) {
+                    if (xx in 1 until width - 1 && yy in 1 until height - 1 && edgeMap[yy * width + xx] >= edgeThreshold) {
+                        supported = true
+                    }
+                }
+            }
+            if (supported) hits += 1
+        }
+        return hits / (samples + 1f)
     }
 
     private fun isStableQuad(corners: List<Offset>): Boolean {
@@ -390,7 +485,64 @@ object EdgeAnalyzer {
         val horizontalBalance = min(top, bottom) / max(top, bottom).coerceAtLeast(0.001f)
         val verticalBalance = min(left, right) / max(left, right).coerceAtLeast(0.001f)
         val areaScore = (polygonArea(corners) / 0.55f).coerceIn(0f, 1f)
-        return (horizontalBalance * 0.35f + verticalBalance * 0.35f + areaScore * 0.30f).coerceIn(0f, 1f)
+        val angleScore = rightAngleScore(corners)
+        return (
+            horizontalBalance * 0.26f +
+                verticalBalance * 0.26f +
+                areaScore * 0.24f +
+                angleScore * 0.24f
+            ).coerceIn(0f, 1f)
+    }
+
+    private fun rightAngleScore(corners: List<Offset>): Float {
+        val cosines = listOf(
+            abs(angleCosine(corners[3], corners[1], corners[0])),
+            abs(angleCosine(corners[0], corners[2], corners[1])),
+            abs(angleCosine(corners[1], corners[3], corners[2])),
+            abs(angleCosine(corners[2], corners[0], corners[3]))
+        )
+        val maxCosine = cosines.maxOrNull() ?: return 0f
+        return (1f - maxCosine / 0.65f).coerceIn(0f, 1f)
+    }
+
+    private fun angleCosine(p1: Offset, p2: Offset, p0: Offset): Float {
+        val dx1 = p1.x - p0.x
+        val dy1 = p1.y - p0.y
+        val dx2 = p2.x - p0.x
+        val dy2 = p2.y - p0.y
+        val dot = dx1 * dx2 + dy1 * dy2
+        val magnitude1 = sqrt(dx1 * dx1 + dy1 * dy1)
+        val magnitude2 = sqrt(dx2 * dx2 + dy2 * dy2)
+        return dot / (magnitude1 * magnitude2 + 1e-6f)
+    }
+
+    private fun pushHistory(corners: List<Offset>) {
+        if (frameHistory.size >= HISTORY_SIZE) frameHistory.removeFirst()
+        frameHistory.addLast(corners)
+    }
+
+    private fun averageCorners(history: List<List<Offset>>): List<Offset>? {
+        if (history.isEmpty() || history.any { it.size != 4 }) return null
+        return List(4) { index ->
+            Offset(
+                x = history.map { it[index].x }.average().toFloat().coerceIn(0f, 1f),
+                y = history.map { it[index].y }.average().toFloat().coerceIn(0f, 1f)
+            )
+        }
+    }
+
+    private fun maxCornerJitter(history: List<List<Offset>>, average: List<Offset>): Float {
+        if (history.isEmpty() || average.size != 4) return 1f
+        var maxDistance = 0f
+        for (corners in history) {
+            if (corners.size != 4) continue
+            for (i in 0..3) {
+                val dx = corners[i].x - average[i].x
+                val dy = corners[i].y - average[i].y
+                maxDistance = max(maxDistance, sqrt(dx * dx + dy * dy))
+            }
+        }
+        return maxDistance
     }
 
     private fun IntArray.percentile(percent: Float): Int {
@@ -432,9 +584,15 @@ object EdgeAnalyzer {
         return sqrt(dx * dx + dy * dy)
     }
 
+    fun reset() {
+        resetSmoothing()
+        lastRotation = Int.MIN_VALUE
+    }
+
     private fun resetSmoothing() {
         smoothedCorners = null
         smoothedConfidence = 0f
         missedFrames = 0
+        frameHistory.clear()
     }
 }

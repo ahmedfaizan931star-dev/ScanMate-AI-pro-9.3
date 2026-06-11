@@ -1,17 +1,42 @@
 package com.synthbyte.scanmate.ui.theme
 
 import android.app.Activity
+import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import com.synthbyte.scanmate.data.ThemeMode
+
+object ScanMateSpacing {
+    val xxs: Dp = 4.dp
+    val xs: Dp = 8.dp
+    val sm: Dp = 12.dp
+    val md: Dp = 16.dp
+    val lg: Dp = 24.dp
+    val xl: Dp = 32.dp
+    val xxl: Dp = 40.dp
+}
+
+object ScanMateElevation {
+    val level0: Dp = 0.dp
+    val level1: Dp = 1.dp
+    val level2: Dp = 3.dp
+    val level3: Dp = 6.dp
+    val level4: Dp = 8.dp
+    val level5: Dp = 12.dp
+}
 
 val LightColorScheme = lightColorScheme(
     primary = LightPrimary,
@@ -22,6 +47,8 @@ val LightColorScheme = lightColorScheme(
     onSecondary = Color.White,
     secondaryContainer = LightAccentContainer,
     onSecondaryContainer = LightAccent,
+    tertiary = Color(0xFF0E7490),
+    onTertiary = Color.White,
     background = LightBackground,
     onBackground = LightText,
     surface = LightSurface,
@@ -42,6 +69,8 @@ val DarkColorScheme = darkColorScheme(
     onSecondary = DarkOnSecondary,
     secondaryContainer = DarkAccentContainer,
     onSecondaryContainer = DarkAccent,
+    tertiary = Color(0xFF67E8F9),
+    onTertiary = Color(0xFF083344),
     background = DarkBackground,
     onBackground = DarkText,
     surface = DarkSurface,
@@ -56,7 +85,7 @@ val DarkColorScheme = darkColorScheme(
 @Composable
 fun ScanMateTheme(
     themeMode: ThemeMode = ThemeMode.SYSTEM,
-    dynamicColor: Boolean = false,
+    dynamicColor: Boolean = true,
     content: @Composable () -> Unit
 ) {
     val darkTheme = when (themeMode) {
@@ -64,7 +93,14 @@ fun ScanMateTheme(
         ThemeMode.LIGHT -> false
         ThemeMode.DARK -> true
     }
-    val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme
+    val context = LocalContext.current
+    val colorScheme = when {
+        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+        }
+        darkTheme -> DarkColorScheme
+        else -> LightColorScheme
+    }
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {

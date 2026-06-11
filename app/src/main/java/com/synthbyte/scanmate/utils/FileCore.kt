@@ -7,6 +7,7 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import android.widget.Toast
 import androidx.core.content.FileProvider
+import com.synthbyte.scanmate.core.SafeLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -80,7 +81,7 @@ object FileCore {
             }
             context.startActivity(Intent.createChooser(shareIntent, "Share file"))
         } catch (e: Exception) {
-            e.printStackTrace()
+            SafeLogger.e("FileCore", "Share file failed", e)
             Toast.makeText(context, "No app found to share this file", Toast.LENGTH_SHORT).show()
         }
     }
@@ -98,7 +99,7 @@ object FileCore {
             }
             context.startActivity(Intent.createChooser(intent, "Open with"))
         } catch (e: Exception) {
-            e.printStackTrace()
+            SafeLogger.e("FileCore", "Open file failed", e)
             Toast.makeText(context, "No app found to open this file", Toast.LENGTH_SHORT).show()
         }
     }
@@ -111,7 +112,7 @@ object FileCore {
             }
             context.startActivity(Intent.createChooser(shareIntent, title))
         } catch (e: Exception) {
-            e.printStackTrace()
+            SafeLogger.e("FileCore", "Share text failed", e)
             Toast.makeText(context, "No app found to share text", Toast.LENGTH_SHORT).show()
         }
     }
@@ -126,7 +127,7 @@ object FileCore {
             } ?: return null
             file.takeIf { it.exists() && it.length() > 0L }
         } catch (e: Exception) {
-            e.printStackTrace()
+            SafeLogger.e("FileCore", "File operation failed", e)
             null
         }
     }
@@ -140,7 +141,7 @@ object FileCore {
             FileOutputStream(file).use { out -> out.write(text.toByteArray(Charsets.UTF_8)) }
             file.takeIf { it.exists() && it.length() > 0L }
         } catch (e: Exception) {
-            e.printStackTrace()
+            SafeLogger.e("FileCore", "File operation failed", e)
             null
         }
     }
@@ -171,7 +172,7 @@ object FileCore {
             }
             file.takeIf { it.exists() && it.length() > 0L }
         } catch (e: Exception) {
-            e.printStackTrace()
+            SafeLogger.e("FileCore", "File operation failed", e)
             null
         }
     }
@@ -202,7 +203,7 @@ object FileCore {
             if (deleteSource && source.canonicalPath != target.canonicalPath) runCatching { source.delete() }
             target
         } catch (e: Exception) {
-            e.printStackTrace()
+            SafeLogger.e("FileCore", "File operation failed", e)
             null
         }
     }

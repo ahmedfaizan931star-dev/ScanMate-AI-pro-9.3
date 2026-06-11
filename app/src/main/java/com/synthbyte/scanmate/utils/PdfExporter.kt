@@ -23,6 +23,7 @@ import java.io.File
 import java.io.FileOutputStream
 import kotlin.math.max
 import kotlin.math.roundToInt
+import com.synthbyte.scanmate.core.SafeLogger
 
 object PdfExporter {
 
@@ -163,7 +164,7 @@ object PdfExporter {
                 null
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            SafeLogger.e("PdfExporter", "Operation failed", e)
             null
         } finally {
             try {
@@ -220,7 +221,7 @@ object PdfExporter {
                 null
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            SafeLogger.e("PdfExporter", "Operation failed", e)
             null
         } finally {
             try {
@@ -329,7 +330,7 @@ object PdfExporter {
                 }
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            SafeLogger.e("PdfExporter", "Operation failed", e)
             emptyList()
         } finally {
             try {
@@ -387,7 +388,7 @@ object PdfExporter {
             FileOutputStream(file).use { pdfDocument.writeTo(it) }
             file.takeIf { it.exists() && it.length() > 0L }
         } catch (e: Exception) {
-            e.printStackTrace()
+            SafeLogger.e("PdfExporter", "Operation failed", e)
             null
         } finally {
             runCatching { pdfDocument.close() }
@@ -472,7 +473,7 @@ object PdfExporter {
             if (!longBitmap.isRecycled) runCatching { longBitmap.recycle() }
             file
         } catch (e: Exception) {
-            e.printStackTrace()
+            SafeLogger.e("PdfExporter", "Operation failed", e)
             null
         }
     }

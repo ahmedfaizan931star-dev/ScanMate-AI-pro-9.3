@@ -5,9 +5,12 @@ import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import com.synthbyte.scanmate.core.SafeLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import java.io.DataInputStream
+import java.io.DataOutputStream
 import java.io.File
 import java.security.KeyStore
 import javax.crypto.Cipher
@@ -22,6 +25,8 @@ object EncryptedVaultUtils {
     private const val GCM_TAG_BITS = 128
     private const val VERSION_TEXT_V1 = "SCANMATE_VAULT_V1"
     private const val VERSION_V2 = "SCANMATE_VAULT_V2"
+    private const val VERSION_BINARY_V3 = "SMVAULT3"
+    private const val TAG = "EncryptedVault"
 
     data class VaultMetadata(
         val displayName: String,
@@ -45,8 +50,8 @@ object EncryptedVaultUtils {
                 bytes = text.toByteArray(Charsets.UTF_8),
                 vaultBaseName = safeName
             )
-        } catch (e: Exception) {
-            e.printStackTrace()
+        } catch (throwable: Throwable) {
+            SafeLogger.e(TAG, "Saving encrypted text failed", throwable)
             null
         }
     }
@@ -75,8 +80,8 @@ object EncryptedVaultUtils {
                 runCatching { sourceFile.delete() }
             }
             vaultFile
-        } catch (e: Exception) {
-            e.printStackTrace()
+        } catch (throwable: Throwable) {
+            SafeLogger.e(TAG, "Saving encrypted file failed", throwable)
             null
         }
     }
@@ -141,8 +146,8 @@ object EncryptedVaultUtils {
             } else {
                 null
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
+        } catch (throwable: Throwable) {
+            SafeLogger.e(TAG, "Reading encrypted text failed", throwable)
             null
         }
     }
@@ -156,25 +161,20 @@ object EncryptedVaultUtils {
             val output = File(cacheDir, safeName)
             output.writeBytes(bytes)
             output.takeIf { it.exists() && it.length() > 0L }
-        } catch (e: Exception) {
-            e.printStackTrace()
+        } catch (throwable: Throwable) {
+            SafeLogger.e(TAG, "Decrypting vault item failed", throwable)
             null
         }
     }
 
     fun readMetadata(file: File): VaultMetadata? {
         return try {
+            if (isBinaryV3(file)) return readBinaryEnvelope(file)?.metadata
             val lines = file.readLines(Charsets.UTF_8)
             when {
                 lines.size >= 4 && lines[0] == VERSION_V2 -> {
                     val json = JSONObject(String(Base64.decode(lines[1], Base64.NO_WRAP), Charsets.UTF_8))
-                    VaultMetadata(
-                        displayName = json.optString("displayName", file.nameWithoutExtension),
-                        mimeType = json.optString("mimeType", "application/octet-stream"),
-                        itemType = json.optString("itemType", "file"),
-                        originalExtension = json.optString("originalExtension", "bin"),
-                        createdAt = json.optLong("createdAt", file.lastModified())
-                    )
+                    metadataFromJson(json, file)
                 }
                 lines.size >= 3 && lines[0] == VERSION_TEXT_V1 -> VaultMetadata(
                     displayName = "${file.nameWithoutExtension}.txt",
@@ -185,12 +185,44 @@ object EncryptedVaultUtils {
                 )
                 else -> null
             }
-        } catch (e: Exception) {
+        } catch (throwable: Throwable) {
+            SafeLogger.e(TAG, "Reading vault metadata failed", throwable)
             null
         }
     }
 
     fun isVaultFile(file: File): Boolean = file.isFile && file.extension.equals("vault", ignoreCase = true)
+
+    fun isEncryptionReady(): Boolean = runCatching { getOrCreateKey(); true }.getOrDefault(false)
+
+    /**
+     * Re-encrypts vault files in the newest binary envelope. Existing Keystore material remains
+     * decrypt-compatible; this is safe to run after OS biometric enrollment changes.
+     */
+    suspend fun rotateVaultEnvelope(context: Context): Int = withContext(Dispatchers.IO) {
+        val vaultDir = FileUtils.appFolder(context, "Vault") ?: return@withContext 0
+        val files = vaultDir.listFiles { file -> isVaultFile(file) }.orEmpty()
+        var rotated = 0
+        files.forEach { file ->
+            val metadata = readMetadata(file) ?: return@forEach
+            val bytes = decryptPayload(file) ?: return@forEach
+            val temp = writeEncryptedPayload(
+                context = context,
+                displayName = metadata.displayName,
+                itemType = metadata.itemType,
+                mimeType = metadata.mimeType,
+                originalExtension = metadata.originalExtension,
+                bytes = bytes,
+                vaultBaseName = "${file.nameWithoutExtension}_rotated"
+            ) ?: return@forEach
+            if (temp.exists() && temp.length() > 0L) {
+                runCatching { file.delete() }
+                runCatching { temp.renameTo(file) }
+                rotated += 1
+            }
+        }
+        rotated
+    }
 
     private fun writeEncryptedPayload(
         context: Context,
@@ -222,18 +254,27 @@ object EncryptedVaultUtils {
             counter += 1
         }
 
-        val payload = listOf(
-            VERSION_V2,
-            Base64.encodeToString(metadata.toString().toByteArray(Charsets.UTF_8), Base64.NO_WRAP),
-            Base64.encodeToString(cipher.iv, Base64.NO_WRAP),
-            Base64.encodeToString(encrypted, Base64.NO_WRAP)
-        ).joinToString("\n")
-
-        file.writeText(payload, Charsets.UTF_8)
+        DataOutputStream(file.outputStream().buffered()).use { output ->
+            output.writeUTF(VERSION_BINARY_V3)
+            val metadataBytes = metadata.toString().toByteArray(Charsets.UTF_8)
+            output.writeInt(metadataBytes.size)
+            output.write(metadataBytes)
+            output.writeInt(cipher.iv.size)
+            output.write(cipher.iv)
+            output.writeInt(encrypted.size)
+            output.write(encrypted)
+        }
         return file.takeIf { it.exists() && it.length() > 0L }
     }
 
     private fun decryptPayload(file: File): ByteArray? {
+        if (isBinaryV3(file)) {
+            val envelope = readBinaryEnvelope(file) ?: return null
+            val cipher = Cipher.getInstance(TRANSFORMATION)
+            cipher.init(Cipher.DECRYPT_MODE, getOrCreateKey(), GCMParameterSpec(GCM_TAG_BITS, envelope.iv))
+            return cipher.doFinal(envelope.ciphertext)
+        }
+
         val parts = file.readLines(Charsets.UTF_8)
         val iv: ByteArray
         val encrypted: ByteArray
@@ -258,7 +299,10 @@ object EncryptedVaultUtils {
     private fun getOrCreateKey(): SecretKey {
         val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
         (keyStore.getEntry(KEY_ALIAS, null) as? KeyStore.SecretKeyEntry)?.secretKey?.let { return it }
+        return generateKey(strongBox = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P)
+    }
 
+    private fun generateKey(strongBox: Boolean): SecretKey {
         val keyGenerator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
         val builder = KeyGenParameterSpec.Builder(
             KEY_ALIAS,
@@ -272,9 +316,55 @@ object EncryptedVaultUtils {
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             builder.setUnlockedDeviceRequired(false)
+            if (strongBox) builder.setIsStrongBoxBacked(true)
         }
 
-        keyGenerator.init(builder.build())
-        return keyGenerator.generateKey()
+        return try {
+            keyGenerator.init(builder.build())
+            keyGenerator.generateKey()
+        } catch (throwable: Throwable) {
+            if (strongBox) {
+                SafeLogger.e(TAG, "StrongBox unavailable; falling back to Android Keystore", throwable)
+                generateKey(strongBox = false)
+            } else {
+                throw throwable
+            }
+        }
     }
+
+    private data class BinaryEnvelope(
+        val metadata: VaultMetadata,
+        val iv: ByteArray,
+        val ciphertext: ByteArray
+    )
+
+    private fun isBinaryV3(file: File): Boolean = runCatching {
+        DataInputStream(file.inputStream().buffered()).use { it.readUTF() == VERSION_BINARY_V3 }
+    }.getOrDefault(false)
+
+    private fun readBinaryEnvelope(file: File): BinaryEnvelope? = runCatching {
+        DataInputStream(file.inputStream().buffered()).use { input ->
+            val version = input.readUTF()
+            if (version != VERSION_BINARY_V3) return@runCatching null
+            val metadataBytes = ByteArray(input.readInt().coerceIn(0, 64 * 1024))
+            input.readFully(metadataBytes)
+            val iv = ByteArray(input.readInt().coerceIn(1, 1024))
+            input.readFully(iv)
+            val ciphertext = ByteArray(input.readInt().coerceAtLeast(0))
+            input.readFully(ciphertext)
+            BinaryEnvelope(
+                metadata = metadataFromJson(JSONObject(String(metadataBytes, Charsets.UTF_8)), file),
+                iv = iv,
+                ciphertext = ciphertext
+            )
+        }
+    }.getOrNull()
+
+    private fun metadataFromJson(json: JSONObject, file: File): VaultMetadata = VaultMetadata(
+        displayName = json.optString("displayName", file.nameWithoutExtension),
+        mimeType = json.optString("mimeType", "application/octet-stream"),
+        itemType = json.optString("itemType", "file"),
+        originalExtension = json.optString("originalExtension", "bin"),
+        createdAt = json.optLong("createdAt", file.lastModified())
+    )
 }

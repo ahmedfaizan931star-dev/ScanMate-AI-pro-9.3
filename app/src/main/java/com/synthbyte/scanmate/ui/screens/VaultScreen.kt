@@ -57,6 +57,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
+import com.synthbyte.scanmate.security.SecurityAudit
+import com.synthbyte.scanmate.ui.components.SecureScreenEffect
 import com.synthbyte.scanmate.utils.EncryptedVaultUtils
 import com.synthbyte.scanmate.utils.FileUtils
 import kotlinx.coroutines.Dispatchers
@@ -70,6 +72,7 @@ import java.util.Locale
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun VaultScreen(onNavigateBack: () -> Unit) {
+    SecureScreenEffect()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val biometricManager = BiometricManager.from(context)
@@ -95,6 +98,7 @@ fun VaultScreen(onNavigateBack: () -> Unit) {
                 override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
                     vaultUnlocked = true
                     authError = null
+                    SecurityAudit.markVaultAccess(context)
                 }
 
                 override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {

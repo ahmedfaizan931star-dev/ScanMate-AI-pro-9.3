@@ -5,6 +5,7 @@ import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.CertificatePinner
 import okhttp3.OkHttpClient
 import retrofit2.Response
 import retrofit2.Retrofit
@@ -76,10 +77,28 @@ interface GeminiApiService {
     ): Response<GenerateContentResponse>
 }
 
+private object GeminiCertificatePins {
+    private const val HOST = "generativelanguage.googleapis.com"
+
+    fun create(): CertificatePinner {
+        val configuredPins = BuildConfig.GEMINI_CERT_PINS
+            .split(',', ';', '\n')
+            .map { it.trim() }
+            .filter { it.startsWith("sha256/") }
+
+        if (configuredPins.isEmpty()) return CertificatePinner.DEFAULT
+
+        return CertificatePinner.Builder().apply {
+            configuredPins.forEach { pin -> add(HOST, pin) }
+        }.build()
+    }
+}
+
 object RetrofitClient {
     private const val BASE_URL = "https://generativelanguage.googleapis.com/"
 
     private val okHttpClient = OkHttpClient.Builder()
+        .certificatePinner(GeminiCertificatePins.create())
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
         .writeTimeout(60, TimeUnit.SECONDS)
@@ -87,7 +106,6 @@ object RetrofitClient {
             if (BuildConfig.DEBUG) addDebugLoggingInterceptor()
         }
         .build()
-
 
     private fun OkHttpClient.Builder.addDebugLoggingInterceptor() {
         runCatching {

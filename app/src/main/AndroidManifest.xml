@@ -6,12 +6,12 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
-    <uses-permission android:name="android.permission.USE_FINGERPRINT" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <application
         android:name=".ScanMateApplication"
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:hardwareAccelerated="true"
@@ -27,6 +27,15 @@
             android:name="com.google.mlkit.vision.DEPENDENCIES"
             android:value="ocr,barcode" />
 
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="com.synthbyte.scanmate.ScanMateInitializer"
+                android:value="androidx.startup" />
+        </provider>
 
         <provider
             android:name="androidx.core.content.FileProvider"
@@ -37,7 +46,6 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
-
 
         <receiver
             android:name=".widgets.QuickScanWidgetProvider"
@@ -79,7 +87,7 @@
             android:resizeableActivity="true"
             android:exported="true"
             android:label="@string/app_name"
-            android:theme="@style/Theme.ScanMate">
+            android:theme="@style/Theme.ScanMate.Starting">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

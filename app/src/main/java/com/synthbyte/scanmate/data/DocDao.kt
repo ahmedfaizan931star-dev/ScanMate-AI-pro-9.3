@@ -65,6 +65,9 @@ interface DocDao {
     @Query("SELECT * FROM documents WHERE id = :id")
     fun getDocument(id: Long): Flow<Document?>
 
+    @Query("SELECT * FROM documents WHERE id = :id LIMIT 1")
+    suspend fun getDocumentOnce(id: Long): Document?
+
     @Transaction
     @Query("SELECT * FROM documents WHERE id = :id")
     fun getDocumentWithPages(id: Long): Flow<DocumentWithPages?>

@@ -11,6 +11,7 @@ import java.io.FileOutputStream
 import java.util.zip.ZipEntry
 import java.util.zip.CRC32
 import java.util.zip.ZipOutputStream
+import com.synthbyte.scanmate.core.SafeLogger
 
 object DocxExporter {
     suspend fun saveXlsxFromText(context: Context, text: String, filename: String): File? = withContext(Dispatchers.IO) {
@@ -71,7 +72,7 @@ object DocxExporter {
             }
             file.takeIf { it.exists() && it.length() > 0L }
         } catch (e: Exception) {
-            e.printStackTrace()
+            SafeLogger.e("DocxExporter", "Operation failed", e)
             null
         }
     }
@@ -172,7 +173,7 @@ object DocxExporter {
             }
             file.takeIf { it.exists() && it.length() > 0L }
         } catch (e: Exception) {
-            e.printStackTrace()
+            SafeLogger.e("DocxExporter", "Operation failed", e)
             null
         }
     }
@@ -284,7 +285,7 @@ object DocxExporter {
             exportDocx(cleaned, file)
             file.takeIf { it.exists() && it.length() > 0L }
         } catch (e: Exception) {
-            e.printStackTrace()
+            SafeLogger.e("DocxExporter", "Operation failed", e)
             null
         }
     }

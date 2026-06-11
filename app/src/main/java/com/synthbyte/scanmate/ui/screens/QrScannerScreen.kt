@@ -6,7 +6,6 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.util.Log
 import android.widget.Toast
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
@@ -219,7 +218,7 @@ fun QrScannerScreen(onNavigateBack: () -> Unit) {
                                     }
                                 }
                                 .addOnFailureListener { error ->
-                                    Log.e("QrScannerScreen", "Barcode scan failed", error)
+                                    SafeLogger.e("QrScannerScreen", "Barcode scan failed", error)
                                 }
                                 .addOnCompleteListener {
                                     analyzerBusy.set(false)
@@ -234,7 +233,7 @@ fun QrScannerScreen(onNavigateBack: () -> Unit) {
                 torchEnabled = false
             }
         }.onFailure { throwable ->
-            Log.e("QrScannerScreen", "Camera bind failed", throwable)
+            SafeLogger.e("QrScannerScreen", "Camera bind failed", throwable)
             cameraError = throwable.localizedMessage ?: "QR scanner camera failed to start."
         }
     }

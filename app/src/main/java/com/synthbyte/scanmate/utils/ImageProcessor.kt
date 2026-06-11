@@ -23,6 +23,7 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
+import com.synthbyte.scanmate.core.SafeLogger
 
 val ImageProcessingDispatcher = Dispatchers.Default.limitedParallelism(2)
 
@@ -67,7 +68,7 @@ object ImageProcessor {
             source.inputStream().use { input -> copy.outputStream().use { output -> input.copyTo(output) } }
             copy.takeIf { it.exists() && it.length() > 0L }
         } catch (e: Exception) {
-            e.printStackTrace()
+            SafeLogger.e("ImageProcessor", "Operation failed", e)
             null
         }
     }
@@ -84,7 +85,7 @@ object ImageProcessor {
             options.inPreferredConfig = Bitmap.Config.ARGB_8888
             BitmapFactory.decodeFile(path, options)
         } catch (e: Exception) {
-            e.printStackTrace()
+            SafeLogger.e("ImageProcessor", "Operation failed", e)
             null
         }
     }

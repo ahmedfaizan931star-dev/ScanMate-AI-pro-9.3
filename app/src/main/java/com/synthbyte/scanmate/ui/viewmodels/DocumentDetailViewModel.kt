@@ -4,6 +4,12 @@ import android.content.Context
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.work.ExistingWorkPolicy
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
+import androidx.work.getWorkInfoByIdFlow
+import androidx.work.workDataOf
 import com.synthbyte.scanmate.data.DocDao
 import com.synthbyte.scanmate.data.DocumentWithPages
 import com.synthbyte.scanmate.data.Page
@@ -13,6 +19,7 @@ import com.synthbyte.scanmate.utils.DocumentIntelligence
 import com.synthbyte.scanmate.utils.EncryptedVaultUtils
 import com.synthbyte.scanmate.utils.FileUtils
 import com.synthbyte.scanmate.utils.OcrHelper
+import com.synthbyte.scanmate.workers.DocumentOcrWorker
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -163,34 +170,41 @@ class DocumentDetailViewModel @Inject constructor(
                 publishErrorMessage("No pages available for OCR")
                 return@runCatching
             }
-            _exportState.value = ExportState.Loading("Running OCR…")
-            val pages = dwp.pages.sortedBy { it.pageOrder }
-            val text = withContext(Dispatchers.IO) {
-                pages.mapIndexedNotNull { index, page ->
-                    val file = File(page.imagePath)
-                    if (!file.exists() || file.length() == 0L) return@mapIndexedNotNull null
-                    val fileResult = OcrHelper.extractTextFromFile(context, file)
-                    val result = if (fileResult.startsWith("OCR failed", ignoreCase = true)) {
-                        FileUtils.decodeSampledBitmap(file.absolutePath, 1800, 1800)?.let { bitmap ->
-                            try {
-                                OcrHelper.extractTextFromBitmap(bitmap)
-                            } finally {
-                                if (!bitmap.isRecycled) runCatching { bitmap.recycle() }
-                            }
-                        }.orEmpty()
-                    } else {
-                        fileResult
+            val request = OneTimeWorkRequestBuilder<DocumentOcrWorker>()
+                .setInputData(workDataOf(DocumentOcrWorker.KEY_DOCUMENT_ID to dwp.document.id))
+                .addTag("ocr")
+                .addTag("ocr_document_${dwp.document.id}")
+                .build()
+            val workManager = WorkManager.getInstance(context)
+            workManager.enqueueUniqueWork(
+                "ocr_document_${dwp.document.id}",
+                ExistingWorkPolicy.REPLACE,
+                request
+            )
+            _exportState.value = ExportState.Loading("OCR is running safely in the background…")
+            workManager.getWorkInfoByIdFlow(request.id).collect { info ->
+                when (info?.state) {
+                    WorkInfo.State.SUCCEEDED -> {
+                        val text = info.outputData.getString(DocumentOcrWorker.KEY_PREVIEW_TEXT).orEmpty()
+                        val label = info.outputData.getString(DocumentOcrWorker.KEY_STATUS).orEmpty().ifBlank { "OCR complete" }
+                        _exportState.value = ExportState.OcrSuccess(text, label)
+                        return@collect
                     }
-                    if (result.isBlank() || result.startsWith("OCR failed", ignoreCase = true)) null else "Page ${index + 1}:\n$result"
-                }.joinToString(separator = "\n\n")
+                    WorkInfo.State.FAILED -> {
+                        publishErrorMessage(info.outputData.getString(DocumentOcrWorker.KEY_ERROR) ?: "OCR failed")
+                        return@collect
+                    }
+                    WorkInfo.State.CANCELLED -> {
+                        publishErrorMessage("OCR was cancelled")
+                        return@collect
+                    }
+                    WorkInfo.State.RUNNING -> {
+                        val progress = info.progress.getInt(DocumentOcrWorker.KEY_PROGRESS, 0)
+                        _exportState.value = ExportState.Loading("OCR running… $progress%")
+                    }
+                    WorkInfo.State.ENQUEUED, WorkInfo.State.BLOCKED, null -> Unit
+                }
             }
-            if (text.isBlank()) {
-                publishErrorMessage("No readable text found")
-                return@runCatching
-            }
-            val stats = OcrHelper.buildStats(text)
-            updateOcrAndMetadata(stats.text, dwp.document.workspace.ifBlank { "Inbox" })
-            _exportState.value = ExportState.OcrSuccess(stats.text, stats.qualityLabel)
         }.onFailure { throwable -> publishError(throwable) }
     }
 
