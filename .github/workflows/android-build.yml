@@ -32,9 +32,10 @@ jobs:
 
       - name: Android lint
         run: ./gradlew :app:lintDebug --stacktrace
-     - name: Kotlin formatting
+
+      - name: Kotlin formatting
         run: ./gradlew ktlintCheck -x ktlintKotlinScriptCheck -x :app:ktlintKotlinScriptCheck --stacktrace
-      
+
   unit-tests:
     name: unit tests
     runs-on: ubuntu-latest
