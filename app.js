@@ -16,7 +16,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // Navigation
     function navigateTo(screenId) {
         screens.forEach(s => s.classList.remove('active'));
-        document.getElementById(`${screenId}-screen`).classList.add('active');
+        const targetScreen = document.getElementById(`${screenId}-screen`);
+        if (targetScreen) {
+            targetScreen.classList.add('active');
+        }
         state.currentScreen = screenId;
 
         // Update Nav
@@ -38,10 +41,15 @@ document.addEventListener('DOMContentLoaded', () => {
     navItems.forEach(item => {
         item.addEventListener('click', () => {
             const screen = item.dataset.screen;
-            if (screen === 'home') navigateTo('home');
-            // Other screens can be added here
+            navigateTo(screen);
         });
     });
+
+    // Tool Card Navigation
+    document.getElementById('tool-ocr').addEventListener('click', () => navigateTo('ocr'));
+
+    // OCR Back button
+    document.getElementById('ocr-back-btn').addEventListener('click', () => navigateTo('tools'));
 
     // Document Management
     function renderDocuments() {
@@ -125,6 +133,22 @@ document.addEventListener('DOMContentLoaded', () => {
             addDocument();
             navigateTo('home');
         }, 100);
+    });
+
+    // Translation Logic (Mock)
+    document.getElementById('translate-btn').addEventListener('click', () => {
+        const input = document.getElementById('ocr-input').value;
+        const lang = document.getElementById('target-lang').value;
+        if (!input.trim()) {
+            alert('Please enter some text to translate');
+            return;
+        }
+
+        const resultCard = document.getElementById('translation-result');
+        const resultText = document.getElementById('translated-text');
+
+        resultCard.style.display = 'block';
+        resultText.textContent = `[Translated to ${lang}]: ${input}`;
     });
 
     // Search Logic (Mock)

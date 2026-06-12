@@ -313,6 +313,72 @@ body {
     opacity: 0.5;
 }
 
+/* Tools Grid */
+.tools-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}
+
+.tool-card {
+    background: white;
+    border: 1px solid var(--outline-variant);
+    border-radius: 16px;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--on-surface);
+}
+
+.tool-card .material-icons-outlined {
+    font-size: 32px;
+    color: var(--primary);
+}
+
+/* OCR Screen */
+.ocr-container {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.language-select {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.language-select select {
+    padding: 8px;
+    border-radius: 8px;
+    border: 1px solid var(--outline-variant);
+    flex: 1;
+}
+
+#ocr-input {
+    width: 100%;
+    height: 200px;
+    padding: 12px;
+    border-radius: 12px;
+    border: 1px solid var(--outline-variant);
+    font-family: inherit;
+    resize: none;
+}
+
+.result-card {
+    background: var(--primary-container);
+    color: var(--on-primary-container);
+    padding: 16px;
+    border-radius: 16px;
+}
+
 /* Bottom Nav */
 .bottom-nav {
     position: fixed;

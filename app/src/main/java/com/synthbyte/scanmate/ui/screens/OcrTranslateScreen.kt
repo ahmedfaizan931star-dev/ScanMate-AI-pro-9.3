@@ -75,7 +75,7 @@ fun OcrTranslateScreen(onNavigateBack: () -> Unit, settingsRepository: SettingsR
     val canUseOnlineAi = isOnline && !apiKey.isNullOrBlank()
     val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
 
-    var selectedLanguage by remember { mutableStateOf(OcrTranslationEngine.supportedLanguages.first()) }
+    var selectedLanguage by remember { mutableStateOf(OcrTranslationEngine.supportedLanguages.last()) }
     var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
     var ocrText by remember { mutableStateOf("") }
     var translatedText by remember { mutableStateOf("") }

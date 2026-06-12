@@ -69,12 +69,77 @@
                     <span class="count-label" id="document-count">0 shown</span>
                 </div>
                 <div id="document-list" class="document-list">
-                    <!-- Documents will be injected here -->
                     <div class="empty-state">
                         <span class="material-icons-outlined">description</span>
                         <p>No documents yet</p>
                         <button class="btn btn-primary" id="empty-scan-btn">Scan now</button>
                     </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Tools Screen -->
+        <section id="tools-screen" class="screen">
+            <header class="header">
+                <div class="brand-zone">
+                    <span class="brand-label">SCANMATE AI PRO</span>
+                    <h1 class="screen-title">Tools Hub</h1>
+                </div>
+            </header>
+            <div class="tools-grid">
+                <button class="tool-card" id="tool-pdf">
+                    <span class="material-icons-outlined">picture_as_pdf</span>
+                    <span>PDF Tools</span>
+                </button>
+                <button class="tool-card" id="tool-qr">
+                    <span class="material-icons-outlined">qr_code_scanner</span>
+                    <span>QR Tools</span>
+                </button>
+                <button class="tool-card" id="tool-ocr">
+                    <span class="material-icons-outlined">translate</span>
+                    <span>OCR Translate</span>
+                </button>
+                <button class="tool-card" id="tool-vault">
+                    <span class="material-icons-outlined">lock</span>
+                    <span>Safe Vault</span>
+                </button>
+                <button class="tool-card" id="tool-ai">
+                    <span class="material-icons-outlined">auto_awesome</span>
+                    <span>AI Assistant</span>
+                </button>
+                <button class="tool-card" id="tool-files">
+                    <span class="material-icons-outlined">folder</span>
+                    <span>File Manager</span>
+                </button>
+            </div>
+        </section>
+
+        <!-- OCR Translate Screen -->
+        <section id="ocr-screen" class="screen">
+            <header class="header">
+                <button class="icon-btn" id="ocr-back-btn"><span class="material-icons-outlined">arrow_back</span></button>
+                <div class="brand-zone" style="margin-left: 12px;">
+                    <h1 class="screen-title" style="font-size: 20px;">OCR Translate</h1>
+                </div>
+            </header>
+            <div class="ocr-container">
+                <div class="language-select">
+                    <label>Target Language:</label>
+                    <select id="target-lang">
+                        <option value="en">English</option>
+                        <option value="es">Spanish</option>
+                        <option value="fr">French</option>
+                        <option value="de">German</option>
+                        <option value="hi">Hindi</option>
+                        <option value="ar">Arabic</option>
+                        <option value="ur">Urdu</option>
+                    </select>
+                </div>
+                <textarea id="ocr-input" placeholder="Extracted OCR text will appear here..."></textarea>
+                <button class="btn btn-primary" id="translate-btn">Translate (Mock)</button>
+                <div id="translation-result" class="result-card" style="display: none;">
+                    <h3>Translation Preview</h3>
+                    <p id="translated-text"></p>
                 </div>
             </div>
         </section>
