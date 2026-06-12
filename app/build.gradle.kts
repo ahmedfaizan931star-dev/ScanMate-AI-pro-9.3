@@ -1,5 +1,5 @@
-import java.util.Locale
 import java.util.Properties
+import org.gradle.testing.jacoco.tasks.JacocoReport
 
 plugins {
     alias(libs.plugins.android.application)
@@ -8,6 +8,8 @@ plugins {
     alias(libs.plugins.google.devtools.ksp)
     alias(libs.plugins.kotlin.kapt)
     alias(libs.plugins.hilt)
+    id("jacoco")
+    alias(libs.plugins.ktlint)
 }
 
 val compileSdkOverride = providers.gradleProperty("SCANMATE_COMPILE_SDK").orElse("35").get().toInt()
@@ -15,11 +17,11 @@ val targetSdkOverride = providers.gradleProperty("SCANMATE_TARGET_SDK").orElse("
 val versionCodeOverride =
     (
         System.getenv("VERSION_CODE")
-            ?: providers.gradleProperty("VERSION_CODE").orElse("5").get()
+            ?: providers.gradleProperty("VERSION_CODE").orElse("6").get()
     ).toInt()
 val versionNameOverride =
     System.getenv("VERSION_NAME")
-        ?: providers.gradleProperty("VERSION_NAME").orElse("1.5.0").get()
+        ?: providers.gradleProperty("VERSION_NAME").orElse("1.6.0").get()
 
 val signingProperties =
     Properties().apply {
@@ -31,6 +33,9 @@ val signingProperties =
         }
     }
 
+fun String?.isUsableSigningValue(): Boolean =
+    !isNullOrBlank() && !trim().startsWith("YOUR_", ignoreCase = true)
+
 val releaseKeystorePath =
     System.getenv("KEYSTORE_PATH")
         ?: signingProperties.getProperty("storeFile")
@@ -39,6 +44,7 @@ val releaseKeystorePath =
 
 val releaseStorePassword =
     System.getenv("KEY_STORE_PASSWORD")
+        ?: System.getenv("SCANMATE_STORE_PASSWORD")
         ?: System.getenv("STORE_PASSWORD")
         ?: signingProperties.getProperty("storePassword")
         ?: (project.findProperty("storePassword") as String?)
@@ -54,10 +60,25 @@ val releaseKeyPassword =
         ?: signingProperties.getProperty("keyPassword")
         ?: (project.findProperty("keyPassword") as String?)
 
+val releaseKeystoreFile = file(releaseKeystorePath)
+
+val requireReleaseSigning =
+    System.getenv("SCANMATE_REQUIRE_RELEASE_SIGNING")
+        ?.equals("true", ignoreCase = true) == true
+
 val hasReleaseSigning =
-    releaseKeystorePath.isNotBlank() &&
-        !releaseStorePassword.isNullOrBlank() &&
-        !releaseKeyPassword.isNullOrBlank()
+    releaseKeystoreFile.exists() &&
+        releaseStorePassword.isUsableSigningValue() &&
+        releaseKeyAlias.isUsableSigningValue() &&
+        releaseKeyPassword.isUsableSigningValue()
+
+if (requireReleaseSigning && !hasReleaseSigning) {
+    throw GradleException(
+        "Release signing is required but not fully configured.\n" +
+            "Check KEYSTORE_PATH, KEY_STORE_PASSWORD/STORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD, " +
+            "and the decoded keystore file at: ${releaseKeystoreFile.absolutePath}",
+    )
+}
 
 android {
     namespace = "com.synthbyte.scanmate"
@@ -65,20 +86,23 @@ android {
 
     defaultConfig {
         applicationId = "com.synthbyte.scanmate"
-        minSdk = 24
+        minSdk = 26
         targetSdk = targetSdkOverride
         versionCode = versionCodeOverride
         versionName = versionNameOverride
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
+        buildConfigField("String", "GEMINI_CERT_PINS", "\"\"")
     }
 
     signingConfigs {
-        create("release") {
-            storeFile = file(releaseKeystorePath)
-            storePassword = releaseStorePassword ?: ""
-            keyAlias = releaseKeyAlias
-            keyPassword = releaseKeyPassword ?: ""
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = releaseKeystoreFile
+                storePassword = releaseStorePassword.orEmpty()
+                keyAlias = releaseKeyAlias.orEmpty()
+                keyPassword = releaseKeyPassword.orEmpty()
+            }
         }
     }
 
@@ -98,7 +122,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
-            signingConfig = signingConfigs.getByName("release")
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
@@ -140,14 +166,77 @@ android {
         }
     }
 
+    lint {
+        abortOnError = true
+        checkReleaseBuilds = true
+        warningsAsErrors = false
+        disable += setOf("GradleDependency")
+    }
+
     testOptions {
         unitTests {
             isIncludeAndroidResources = true
+            all { test ->
+                test.useJUnitPlatform()
+                test.testLogging {
+                    events("passed", "skipped", "failed")
+                }
+            }
         }
     }
 }
 
+jacoco {
+    toolVersion = libs.versions.jacoco.get()
+}
+
+ktlint {
+    android.set(true)
+    ignoreFailures.set(false)
+    filter {
+        exclude { entry ->
+            entry.file.path.contains("/build/")
+        }
+    }
+}
+
+tasks.register<JacocoReport>("jacocoTestReport") {
+    dependsOn("testDebugUnitTest")
+
+    reports {
+        xml.required.set(true)
+        html.required.set(true)
+        csv.required.set(false)
+    }
+
+    val fileFilter =
+        listOf(
+            "**/R.class",
+            "**/R$*.class",
+            "**/BuildConfig.*",
+            "**/Manifest*.*",
+            "**/*Test*.*",
+            "android/**/*.*",
+        )
+
+    val debugTree =
+        fileTree(layout.buildDirectory.dir("tmp/kotlin-classes/debug").get().asFile) {
+            exclude(fileFilter)
+        }
+
+    classDirectories.setFrom(debugTree)
+    sourceDirectories.setFrom(files("src/main/java"))
+    executionData.setFrom(
+        fileTree(layout.buildDirectory.get().asFile) {
+            include("outputs/unit_test_code_coverage/debugUnitTest/testDebugUnitTest.exec")
+        },
+    )
+}
+
 dependencies {
+    implementation("androidx.core:core-splashscreen:1.0.1")
+    implementation("androidx.work:work-runtime-ktx:2.10.1")
+
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.accompanist.permissions)
     implementation(libs.androidx.activity.compose)
@@ -181,6 +270,11 @@ dependencies {
     implementation(libs.hilt.android)
     implementation(libs.androidx.biometric)
     implementation(libs.androidx.security.crypto)
+    implementation(libs.androidx.profileinstaller)
+    implementation(libs.androidx.core.splashscreen)
+    implementation(libs.androidx.startup.runtime)
+    implementation(libs.androidx.work.runtime.ktx)
+
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
     implementation("com.itextpdf:itextg:5.5.10")
     implementation("com.madgag.spongycastle:core:1.58.0.0")
@@ -196,6 +290,11 @@ dependencies {
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.hilt.android.testing)
     testImplementation(libs.robolectric)
+    testRuntimeOnly(libs.junit.vintage.engine)
+    testRuntimeOnly(libs.junit.jupiter.engine)
+    testImplementation(libs.junit.jupiter.api)
+    testImplementation(libs.turbine)
+    testImplementation(libs.mockk)
 
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
@@ -208,6 +307,7 @@ dependencies {
     debugImplementation(libs.logging.interceptor)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
+    debugImplementation(libs.leakcanary.android)
 
     ksp(libs.androidx.room.compiler)
     ksp(libs.moshi.kotlin.codegen)
